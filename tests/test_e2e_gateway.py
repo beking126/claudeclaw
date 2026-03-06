@@ -42,6 +42,18 @@ def test_gateway_e2e_cli_message_cron_heartbeat_flow(tmp_path: Path):
             send_func=adapter.send,
             agent_func=lambda _prompt, _ws: asyncio.sleep(0, result="cron-report"),
         )
+        await cron.schedule_job(
+            job_id="job-02",
+            prompt="hourly",
+            target={"channel": "telegram", "destination": "chat:1"},
+            interval_seconds=60,
+            run_at_epoch_seconds=0.0,
+        )
+        due_count = await cron.run_due_jobs(
+            now_epoch_seconds=1.0,
+            send_func=adapter.send,
+            agent_func=lambda _prompt, _ws: asyncio.sleep(0, result="cron-due-report"),
+        )
 
         heartbeat = HeartbeatService(db_path=tmp_path / "gateway.db", workspace_root=tmp_path / "workspaces")
         await heartbeat.run_once(
@@ -54,6 +66,7 @@ def test_gateway_e2e_cli_message_cron_heartbeat_flow(tmp_path: Path):
             "delivered": adapter.sent,
             "heartbeat_last": heartbeat.get_last_run(),
             "cron_last": cron.get_last_delivery("job-01"),
+            "cron_due_count": due_count,
         }
 
     result = asyncio.run(_run())
@@ -62,3 +75,4 @@ def test_gateway_e2e_cli_message_cron_heartbeat_flow(tmp_path: Path):
     assert len(result["delivered"]) >= 2
     assert result["heartbeat_last"]["status"] == "ok"
     assert result["cron_last"]["status"] == "ok"
+    assert result["cron_due_count"] == 1

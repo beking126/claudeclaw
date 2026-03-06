@@ -8,6 +8,20 @@ def test_status_command_returns_ok():
     assert exit_code == 0
 
 
+def test_status_text_includes_signal_fields():
+    from claudebot_gateway.cli import status_text
+
+    line = status_text(
+        {
+            "runtime": {"running": False, "worker_count": 5, "unhandled_errors": 0},
+            "signals": {"inbound_queue_depth": 2, "outbound_queue_depth": 3, "due_cron_jobs": 1},
+        }
+    )
+    assert "in=2" in line
+    assert "out=3" in line
+    assert "due_cron=1" in line
+
+
 def test_gateway_once_creates_runtime_artifacts(tmp_path: Path):
     from claudebot_gateway.cli import main
 

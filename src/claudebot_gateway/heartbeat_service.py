@@ -34,6 +34,13 @@ class HeartbeatService:
         )
         return actionable
 
+    def load_source_text(self) -> str:
+        workspace = self._resolver.heartbeat()
+        file_path = workspace / "HEARTBEAT.md"
+        if not file_path.exists():
+            return ""
+        return file_path.read_text(encoding="utf-8")
+
     def get_last_run(self) -> dict[str, str] | None:
         run = self._store.get_last_heartbeat_run()
         if run is None:

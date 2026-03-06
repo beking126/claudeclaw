@@ -24,3 +24,15 @@ def test_heartbeat_triggers_only_when_actionable(tmp_path: Path):
     assert last is not None
     assert last["actionable"] == "1"
     assert last["workspace_key"] == "heartbeat"
+
+
+def test_heartbeat_loads_source_text_from_heartbeat_file(tmp_path: Path):
+    from claudebot_gateway.heartbeat_service import HeartbeatService
+
+    service = HeartbeatService(db_path=tmp_path / "gateway.db", workspace_root=tmp_path / "workspaces")
+    heartbeat_file = tmp_path / "workspaces" / "heartbeat" / "HEARTBEAT.md"
+    heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat_file.write_text("ship release\n", encoding="utf-8")
+
+    text = service.load_source_text()
+    assert text == "ship release\n"

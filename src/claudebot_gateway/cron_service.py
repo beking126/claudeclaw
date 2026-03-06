@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 from typing import Awaitable, Callable
 
 from claudebot_gateway.persistence.sqlite_store import SqliteStore
@@ -56,6 +57,54 @@ class CronService:
             failure_reason=failure_reason,
         )
         return {"run_status": run_status, "delivery_status": delivery_status}
+
+    async def schedule_job(
+        self,
+        *,
+        job_id: str,
+        prompt: str,
+        target: dict[str, str],
+        interval_seconds: int,
+        run_at_epoch_seconds: float | None = None,
+    ) -> None:
+        first_run = time.time() if run_at_epoch_seconds is None else run_at_epoch_seconds
+        self._store.upsert_cron_job(
+            job_id=job_id,
+            prompt=prompt,
+            channel=target["channel"],
+            destination=target["destination"],
+            interval_seconds=interval_seconds,
+            next_run_epoch_seconds=first_run,
+        )
+
+    async def run_due_jobs(
+        self,
+        *,
+        now_epoch_seconds: float | None = None,
+        send_func: SendFunc,
+        agent_func: AgentFunc,
+    ) -> int:
+        now = time.time() if now_epoch_seconds is None else now_epoch_seconds
+        jobs = self._store.list_due_cron_jobs(now_epoch_seconds=now)
+        for job in jobs:
+            await self.run_job_once(
+                job_id=str(job["job_id"]),
+                prompt=str(job["prompt"]),
+                target={"channel": str(job["channel"]), "destination": str(job["destination"])},
+                send_func=send_func,
+                agent_func=agent_func,
+            )
+            interval_seconds = int(job["interval_seconds"])
+            next_run = now + max(1, interval_seconds)
+            self._store.update_cron_job_next_run(
+                job_id=str(job["job_id"]),
+                next_run_epoch_seconds=next_run,
+            )
+        return len(jobs)
+
+    def due_job_count(self, *, now_epoch_seconds: float | None = None) -> int:
+        now = time.time() if now_epoch_seconds is None else now_epoch_seconds
+        return len(self._store.list_due_cron_jobs(now_epoch_seconds=now))
 
     def get_last_delivery(self, job_id: str) -> dict[str, str] | None:
         delivery = self._store.get_last_delivery_by_job(job_id)

@@ -30,3 +30,38 @@ def test_cron_delivery_failure_is_recorded_and_dropped(tmp_path: Path):
     assert delivery is not None
     assert delivery["status"] == "dropped"
     assert delivery["job_id"] == "job-01"
+
+
+def test_cron_scheduler_persists_jobs_and_runs_due_jobs(tmp_path: Path):
+    from claudebot_gateway.cron_service import CronService
+
+    async def _run() -> tuple[int, list[dict[str, str]], dict[str, str] | None]:
+        db_path = tmp_path / "gateway.db"
+        workspace_root = tmp_path / "workspaces"
+        service = CronService(db_path=db_path, workspace_root=workspace_root)
+        await service.schedule_job(
+            job_id="job-02",
+            prompt="daily report",
+            target={"channel": "telegram", "destination": "chat:2"},
+            interval_seconds=60,
+            run_at_epoch_seconds=0.0,
+        )
+        restarted = CronService(db_path=db_path, workspace_root=workspace_root)
+        sent: list[dict[str, str]] = []
+
+        async def send(message: dict[str, str]) -> None:
+            sent.append(message)
+
+        async def agent(_: str, __: Path) -> str:
+            return "report-body"
+
+        count = await restarted.run_due_jobs(now_epoch_seconds=1.0, send_func=send, agent_func=agent)
+        delivery = restarted.get_last_delivery("job-02")
+        return count, sent, delivery
+
+    count, sent, delivery = asyncio.run(_run())
+    assert count == 1
+    assert len(sent) == 1
+    assert sent[0]["destination"] == "chat:2"
+    assert delivery is not None
+    assert delivery["status"] == "ok"

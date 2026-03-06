@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 
 class _CounterWorker:
@@ -27,3 +28,49 @@ def test_runtime_graceful_shutdown_drains_and_stops_tasks():
     assert health["started"] is True
     assert health["stopped"] is True
     assert health["unhandled_errors"] == 0
+
+
+def test_gateway_app_run_once_reads_heartbeat_file(tmp_path: Path):
+    from claudebot_gateway.config import GatewayConfig
+    from claudebot_gateway.persistence.sqlite_store import SqliteStore
+    from claudebot_gateway.runtime import GatewayApp
+
+    async def _run() -> None:
+        workspace_root = tmp_path / "workspaces"
+        heartbeat_file = workspace_root / "heartbeat" / "HEARTBEAT.md"
+        heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
+        heartbeat_file.write_text("check this\n", encoding="utf-8")
+        app = GatewayApp(
+            config=GatewayConfig(
+                workspace_root=workspace_root,
+                sqlite_path=tmp_path / "state" / "gateway.db",
+                heartbeat_interval_seconds=1,
+            )
+        )
+        await app.run_once()
+
+    asyncio.run(_run())
+    run = SqliteStore(db_path=tmp_path / "state" / "gateway.db").get_last_heartbeat_run()
+    assert run is not None
+    assert run["actionable"] == 1
+
+
+def test_gateway_runtime_stop_closes_inbound_intake(tmp_path: Path):
+    from claudebot_gateway.config import GatewayConfig
+    from claudebot_gateway.runtime import GatewayApp
+
+    async def _run() -> bool:
+        app = GatewayApp(
+            config=GatewayConfig(
+                workspace_root=tmp_path / "workspaces",
+                sqlite_path=tmp_path / "state" / "gateway.db",
+                heartbeat_interval_seconds=1,
+            )
+        )
+        await app._runtime.start()
+        await app._runtime.stop()
+        accepted = await app._bus.try_publish_inbound({"channel": "cli", "destination": "d", "text": "x"})
+        return accepted
+
+    accepted = asyncio.run(_run())
+    assert accepted is False

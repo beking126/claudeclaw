@@ -18,7 +18,21 @@ def status_text(runtime: GatewayRuntime | dict[str, object]) -> str:
     if isinstance(runtime_snapshot, dict):
         snapshot = runtime_snapshot
     state = "running" if snapshot["running"] else "stopped"
-    return f"gateway:{state} workers={snapshot['worker_count']} errors={snapshot['unhandled_errors']}"
+    signals: dict[str, object] = {}
+    if isinstance(runtime, dict):
+        maybe_signals = runtime.get("signals")
+        if isinstance(maybe_signals, dict):
+            signals = maybe_signals
+    inbound_raw = signals.get("inbound_queue_depth", 0)
+    outbound_raw = signals.get("outbound_queue_depth", 0)
+    due_raw = signals.get("due_cron_jobs", 0)
+    inbound_depth = int(inbound_raw) if isinstance(inbound_raw, int | str) else 0
+    outbound_depth = int(outbound_raw) if isinstance(outbound_raw, int | str) else 0
+    due_cron = int(due_raw) if isinstance(due_raw, int | str) else 0
+    return (
+        f"gateway:{state} workers={snapshot['worker_count']} errors={snapshot['unhandled_errors']} "
+        f"in={inbound_depth} out={outbound_depth} due_cron={due_cron}"
+    )
 
 
 def _configure_logging(verbose: bool) -> None:

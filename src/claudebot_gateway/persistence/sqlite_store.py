@@ -65,6 +65,19 @@ class SqliteStore:
         )
         self._conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS cron_jobs (
+                job_id TEXT PRIMARY KEY,
+                prompt TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                interval_seconds INTEGER NOT NULL,
+                next_run_epoch_seconds REAL NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        self._conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS heartbeat_runs (
                 run_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 actionable INTEGER NOT NULL,
@@ -182,6 +195,66 @@ class SqliteStore:
             "status": row["status"],
             "failure_reason": row["failure_reason"],
         }
+
+    def upsert_cron_job(
+        self,
+        *,
+        job_id: str,
+        prompt: str,
+        channel: str,
+        destination: str,
+        interval_seconds: int,
+        next_run_epoch_seconds: float,
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO cron_jobs (
+                job_id, prompt, channel, destination, interval_seconds, next_run_epoch_seconds
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+                prompt = excluded.prompt,
+                channel = excluded.channel,
+                destination = excluded.destination,
+                interval_seconds = excluded.interval_seconds,
+                next_run_epoch_seconds = excluded.next_run_epoch_seconds,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (job_id, prompt, channel, destination, interval_seconds, next_run_epoch_seconds),
+        )
+        self._conn.commit()
+
+    def list_due_cron_jobs(self, *, now_epoch_seconds: float) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """
+            SELECT job_id, prompt, channel, destination, interval_seconds, next_run_epoch_seconds
+            FROM cron_jobs
+            WHERE next_run_epoch_seconds <= ?
+            ORDER BY next_run_epoch_seconds ASC
+            """,
+            (now_epoch_seconds,),
+        ).fetchall()
+        return [
+            {
+                "job_id": row["job_id"],
+                "prompt": row["prompt"],
+                "channel": row["channel"],
+                "destination": row["destination"],
+                "interval_seconds": row["interval_seconds"],
+                "next_run_epoch_seconds": row["next_run_epoch_seconds"],
+            }
+            for row in rows
+        ]
+
+    def update_cron_job_next_run(self, *, job_id: str, next_run_epoch_seconds: float) -> None:
+        self._conn.execute(
+            """
+            UPDATE cron_jobs
+            SET next_run_epoch_seconds = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE job_id = ?
+            """,
+            (next_run_epoch_seconds, job_id),
+        )
+        self._conn.commit()
 
     def record_heartbeat_run(
         self,

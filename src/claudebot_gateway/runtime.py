@@ -19,12 +19,20 @@ from claudebot_gateway.workspaces import WorkspaceResolver
 
 Worker = Callable[[asyncio.Event], Coroutine[Any, Any, None]]
 _LOGGER = logging.getLogger("claudebot_gateway.runtime")
+StopHook = Callable[[], None]
 
 
 class GatewayRuntime:
-    def __init__(self, *, workers: list[Worker], drain_timeout_seconds: float = 2.0):
+    def __init__(
+        self,
+        *,
+        workers: list[Worker],
+        drain_timeout_seconds: float = 2.0,
+        on_stopping_hooks: list[StopHook] | None = None,
+    ):
         self._workers = workers
         self._drain_timeout_seconds = drain_timeout_seconds
+        self._on_stopping_hooks = on_stopping_hooks or []
         self._stop_event = asyncio.Event()
         self._tasks: list[asyncio.Task[None]] = []
         self._started = False
@@ -50,6 +58,8 @@ class GatewayRuntime:
         if not self._started or self._stopped:
             return
         _LOGGER.debug("runtime_stop active_tasks=%s", sum(0 if t.done() else 1 for t in self._tasks))
+        for hook in self._on_stopping_hooks:
+            hook()
         self._running = False
         self._stop_event.set()
         try:
@@ -115,10 +125,16 @@ class GatewayApp:
                 self._channel_worker,
                 self._agent_worker,
                 self._dispatch_worker,
+                self._cron_worker,
                 self._heartbeat_worker,
-            ]
+            ],
+            on_stopping_hooks=[self._bus.close_inbound_intake],
         )
-        self._health = HealthService(runtime=self._runtime, http_enabled=config.health_http.enabled)
+        self._health = HealthService(
+            runtime=self._runtime,
+            http_enabled=config.health_http.enabled,
+            signal_provider=self._health_signals,
+        )
 
     async def run_once(self, demo_text: str = "") -> None:
         await self._runtime.start()
@@ -145,6 +161,14 @@ class GatewayApp:
     def status(self) -> dict[str, object]:
         return self._health.snapshot()
 
+    def _health_signals(self) -> dict[str, object]:
+        return {
+            "inbound_queue_depth": self._bus.inbound.qsize(),
+            "outbound_queue_depth": self._bus.outbound.qsize(),
+            "due_cron_jobs": self._cron.due_job_count(),
+            "last_heartbeat_run": self._heartbeat.get_last_run(),
+        }
+
     async def _channel_worker(self, stop_event: asyncio.Event) -> None:
         while not stop_event.is_set():
             await self._channel_manager.poll_once_all()
@@ -167,11 +191,23 @@ class GatewayApp:
     async def _heartbeat_worker(self, stop_event: asyncio.Event) -> None:
         interval = max(1, self._config.heartbeat_interval_seconds)
         while not stop_event.is_set():
-            await self._heartbeat.run_once(source_text="", agent_func=self._noop_agent)
+            source_text = self._heartbeat.load_source_text()
+            await self._heartbeat.run_once(source_text=source_text, agent_func=self._noop_agent)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=float(interval))
             except TimeoutError:
                 continue
+
+    async def _cron_worker(self, stop_event: asyncio.Event) -> None:
+        while not stop_event.is_set():
+            await self._cron.run_due_jobs(send_func=self._cron_send, agent_func=self._noop_agent)
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=1.0)
+            except TimeoutError:
+                continue
+
+    async def _cron_send(self, message: dict[str, str]) -> None:
+        await self._bus.publish_outbound(message)
 
     async def _noop_agent(self, prompt: str, workspace: Path) -> str:
         _ = (prompt, workspace)
