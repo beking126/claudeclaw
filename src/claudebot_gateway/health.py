@@ -1,8 +1,13 @@
-from claudebot_gateway.runtime import GatewayRuntime
+from typing import Protocol
+
+
+class RuntimeHealth(Protocol):
+    def health_snapshot(self) -> dict[str, object]:
+        ...
 
 
 class HealthService:
-    def __init__(self, *, runtime: GatewayRuntime, http_enabled: bool):
+    def __init__(self, *, runtime: RuntimeHealth, http_enabled: bool):
         self._runtime = runtime
         self._http_enabled = http_enabled
         self._http_started = False
