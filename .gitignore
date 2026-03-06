@@ -1,3 +1,7 @@
 .worktrees/
 __pycache__/
 *.pyc
+
+
+# Data
+gateway.db
