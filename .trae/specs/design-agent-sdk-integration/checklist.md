@@ -1,0 +1,10 @@
+- [x] Runtime abstraction exists and gateway components depend on abstraction, not concrete SDK classes
+- [x] Runtime provider selection is configuration-driven and rejects unknown providers clearly
+- [x] Claude Agent SDK adapter executes prompts and returns final response payload reliably
+- [x] Claude adapter propagates configured tools/skills/sub-agents/context/session settings to SDK options
+- [x] Gateway message processing uses selected runtime and preserves outbound channel/destination routing
+- [x] `claudebot-gateway agent` command exists and runs prompt requests successfully
+- [x] `agent` command defaults to `workspaces/main` when workspace is not explicitly provided
+- [x] CLI output and logs include useful runtime/path context without leaking secrets
+- [x] Unit and integration tests cover runtime factory, Claude adapter, gateway flow, and `agent` CLI behavior
+- [x] Full verification suite (tests, lint, typing) passes after implementation

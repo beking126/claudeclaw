@@ -1,5 +1,18 @@
 from pathlib import Path
 
+from claudebot_gateway.agent_runtime import AgentExecutionResult
+
+
+class _FakeRuntime:
+    def __init__(self):
+        self.workspace: Path | None = None
+        self.prompt: str | None = None
+
+    async def execute(self, request):
+        self.workspace = request.workspace
+        self.prompt = request.prompt
+        return AgentExecutionResult(text="runtime-output", provider="test")
+
 
 def test_status_command_returns_ok():
     from claudebot_gateway.cli import main
@@ -64,3 +77,55 @@ def test_status_verbose_emits_debug_and_key_paths(tmp_path: Path, capsys):
     assert "DEBUG" in captured.err
     assert "workspace_root=" in captured.err
     assert "sqlite_path=" in captured.err
+
+
+def test_agent_command_defaults_to_main_workspace(tmp_path: Path, capsys, monkeypatch):
+    from claudebot_gateway.cli import main
+
+    fake_runtime = _FakeRuntime()
+    monkeypatch.setattr("claudebot_gateway.runtime.create_agent_runtime", lambda config: fake_runtime)
+    workspace_root = tmp_path / "workspaces"
+    db_path = tmp_path / "state" / "gateway.db"
+    exit_code = main(
+        [
+            "agent",
+            "--prompt",
+            "hello",
+            "--workspace-root",
+            str(workspace_root),
+            "--db-path",
+            str(db_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.strip() == "runtime-output"
+    assert fake_runtime.prompt == "hello"
+    assert fake_runtime.workspace == workspace_root / "main"
+    assert (workspace_root / "main").exists()
+
+
+def test_agent_command_supports_workspace_override(tmp_path: Path, capsys, monkeypatch):
+    from claudebot_gateway.cli import main
+
+    fake_runtime = _FakeRuntime()
+    monkeypatch.setattr("claudebot_gateway.runtime.create_agent_runtime", lambda config: fake_runtime)
+    workspace_root = tmp_path / "workspaces"
+    db_path = tmp_path / "state" / "gateway.db"
+    exit_code = main(
+        [
+            "agent",
+            "--prompt",
+            "hello",
+            "--workspace-root",
+            str(workspace_root),
+            "--workspace",
+            "custom-room",
+            "--db-path",
+            str(db_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out.strip() == "runtime-output"
+    assert fake_runtime.workspace == workspace_root / "custom-room"

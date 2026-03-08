@@ -74,3 +74,21 @@ def test_gateway_runtime_stop_closes_inbound_intake(tmp_path: Path):
 
     accepted = asyncio.run(_run())
     assert accepted is False
+
+
+def test_gateway_app_init_fails_for_unsupported_runtime_provider(tmp_path: Path):
+    from claudebot_gateway.agent_runtime import UnsupportedRuntimeProviderError
+    from claudebot_gateway.config import AgentRuntimeConfig, GatewayConfig
+    from claudebot_gateway.runtime import GatewayApp
+
+    try:
+        GatewayApp(
+            config=GatewayConfig(
+                workspace_root=tmp_path / "workspaces",
+                sqlite_path=tmp_path / "state" / "gateway.db",
+                agent_runtime=AgentRuntimeConfig(provider="not-supported"),
+            )
+        )
+        assert False
+    except UnsupportedRuntimeProviderError as exc:
+        assert "not-supported" in str(exc)

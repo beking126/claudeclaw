@@ -4,7 +4,8 @@ from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any, Callable
 
-from claudebot_gateway.agent_runner import AgentRunner, TurnHandler
+from claudebot_gateway.agent_runtime import AgentExecutionRequest, create_agent_runtime
+from claudebot_gateway.agent_runner import AgentRunner
 from claudebot_gateway.channel_manager import ChannelManager
 from claudebot_gateway.channels.cli import CliChannel
 from claudebot_gateway.channels.telegram import TelegramChannel
@@ -91,8 +92,9 @@ class GatewayRuntime:
 
 
 class GatewayApp:
-    def __init__(self, *, config: GatewayConfig, turn_handler: TurnHandler | None = None):
+    def __init__(self, *, config: GatewayConfig):
         self._config = config
+        self._agent_runtime = create_agent_runtime(config)
         self._workspace_resolver = WorkspaceResolver(config.workspace_root)
         self._workspace_resolver.main().mkdir(parents=True, exist_ok=True)
         _LOGGER.info(
@@ -101,6 +103,7 @@ class GatewayApp:
             self._workspace_resolver.main().resolve(),
             config.sqlite_path.resolve(),
         )
+        _LOGGER.info("agent_runtime provider=%s", config.agent_runtime.provider)
         self._bus = MessageBus(
             inbound_maxsize=config.message_bus.inbound_maxsize,
             outbound_maxsize=config.message_bus.outbound_maxsize,
@@ -116,7 +119,7 @@ class GatewayApp:
             self._adapters["telegram"] = telegram
             channels["telegram"] = telegram
         self._channel_manager = ChannelManager(channels=channels)
-        self._agent_runner = AgentRunner(turn_handler=turn_handler or self._default_turn_handler)
+        self._agent_runner = AgentRunner(runtime=self._agent_runtime, default_workspace=self._workspace_resolver.main())
         self._dispatcher = OutboundDispatcher(adapters=self._adapters)
         self._cron = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
         self._heartbeat = HeartbeatService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
@@ -180,6 +183,8 @@ class GatewayApp:
                 await asyncio.wait_for(self._agent_runner.process_once(self._bus), timeout=0.05)
             except TimeoutError:
                 continue
+            except Exception:
+                _LOGGER.exception("agent_worker_process_failed")
 
     async def _dispatch_worker(self, stop_event: asyncio.Event) -> None:
         while not stop_event.is_set():
@@ -213,9 +218,15 @@ class GatewayApp:
         _ = (prompt, workspace)
         return "ok"
 
-    def _default_turn_handler(self, inbound: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "channel": inbound.get("channel", "cli"),
-            "destination": inbound.get("destination", "cli:stdout"),
-            "text": f"echo:{inbound.get('text', '')}",
-        }
+    async def execute_prompt(self, *, prompt: str, workspace: Path | None = None) -> str:
+        selected_workspace = workspace or self._workspace_resolver.main()
+        selected_workspace.mkdir(parents=True, exist_ok=True)
+        result = await self._agent_runtime.execute(
+            AgentExecutionRequest(
+                prompt=prompt,
+                workspace=selected_workspace,
+                channel="cli",
+                destination="cli:stdout",
+            )
+        )
+        return result.text

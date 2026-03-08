@@ -59,6 +59,12 @@ def main(argv: list[str] | None = None) -> int:
     status.add_argument("--workspace-root", default="workspaces")
     status.add_argument("--db-path", default="state/gateway.db")
 
+    agent = subparsers.add_parser("agent")
+    agent.add_argument("--prompt", required=True)
+    agent.add_argument("--workspace-root", default="workspaces")
+    agent.add_argument("--workspace", default="main")
+    agent.add_argument("--db-path", default="state/gateway.db")
+
     args = parser.parse_args(argv)
     _configure_logging(args.verbose)
     _LOGGER.debug("verbose_mode_enabled=true")
@@ -100,6 +106,34 @@ def main(argv: list[str] | None = None) -> int:
             asyncio.run(app.run_forever())
         except KeyboardInterrupt:
             return 0
+        return 0
+
+    if args.command == "agent":
+        workspace_root = Path(args.workspace_root)
+        sqlite_path = Path(args.db_path)
+        selected_workspace = workspace_root / args.workspace
+        config = GatewayConfig(
+            workspace_root=workspace_root,
+            sqlite_path=sqlite_path,
+        )
+        app = GatewayApp(
+            config=config
+        )
+        _LOGGER.info(
+            "key_paths workspace_root=%s selected_workspace=%s sqlite_path=%s",
+            workspace_root.resolve(),
+            selected_workspace.resolve(),
+            sqlite_path.resolve(),
+        )
+        _LOGGER.info("agent_runtime provider=%s", config.agent_runtime.provider)
+        try:
+            response = asyncio.run(app.execute_prompt(prompt=args.prompt, workspace=selected_workspace))
+        except KeyboardInterrupt:
+            return 130
+        except Exception:
+            _LOGGER.exception("agent_command_failed")
+            return 1
+        print(response)
         return 0
 
     return 2
