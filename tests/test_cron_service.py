@@ -65,3 +65,66 @@ def test_cron_scheduler_persists_jobs_and_runs_due_jobs(tmp_path: Path):
     assert sent[0]["destination"] == "chat:2"
     assert delivery is not None
     assert delivery["status"] == "ok"
+
+
+def test_cron_scheduler_supports_at_one_shot_jobs(tmp_path: Path):
+    from claudebot_gateway.cron_service import CronService
+
+    async def _run() -> tuple[int, int, list[dict[str, str]]]:
+        service = CronService(db_path=tmp_path / "gateway.db", workspace_root=tmp_path / "workspaces")
+        sent: list[dict[str, str]] = []
+
+        async def send(message: dict[str, str]) -> None:
+            sent.append(message)
+
+        async def agent(_: str, __: Path) -> str:
+            return "one-shot-report"
+
+        await service.schedule_job(
+            job_id="job-at-01",
+            prompt="run once",
+            target={"channel": "telegram", "destination": "chat:at"},
+            schedule_kind="at",
+            run_at_epoch_seconds=0.0,
+        )
+        first = await service.run_due_jobs(now_epoch_seconds=1.0, send_func=send, agent_func=agent)
+        second = await service.run_due_jobs(now_epoch_seconds=2.0, send_func=send, agent_func=agent)
+        return first, second, sent
+
+    first, second, sent = asyncio.run(_run())
+    assert first == 1
+    assert second == 0
+    assert len(sent) == 1
+    assert sent[0]["destination"] == "chat:at"
+
+
+def test_cron_scheduler_supports_cron_expression_jobs(tmp_path: Path):
+    from claudebot_gateway.cron_service import CronService
+
+    async def _run() -> tuple[int, int, int]:
+        service = CronService(db_path=tmp_path / "gateway.db", workspace_root=tmp_path / "workspaces")
+        sent: list[dict[str, str]] = []
+
+        async def send(message: dict[str, str]) -> None:
+            sent.append(message)
+
+        async def agent(_: str, __: Path) -> str:
+            return "cron-expression-report"
+
+        await service.schedule_job(
+            job_id="job-cron-01",
+            prompt="run every five minutes",
+            target={"channel": "telegram", "destination": "chat:cron"},
+            schedule_kind="cron",
+            schedule_value="*/5 * * * *",
+            run_at_epoch_seconds=0.0,
+        )
+        first = await service.run_due_jobs(now_epoch_seconds=1.0, send_func=send, agent_func=agent)
+        second = await service.run_due_jobs(now_epoch_seconds=299.0, send_func=send, agent_func=agent)
+        third = await service.run_due_jobs(now_epoch_seconds=301.0, send_func=send, agent_func=agent)
+        return first, second, third
+
+    first, second, third = asyncio.run(_run())
+    assert first == 1
+    assert second == 0
+    assert third == 1

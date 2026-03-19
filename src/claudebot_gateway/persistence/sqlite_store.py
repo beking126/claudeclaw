@@ -71,11 +71,14 @@ class SqliteStore:
                 channel TEXT NOT NULL,
                 destination TEXT NOT NULL,
                 interval_seconds INTEGER NOT NULL,
+                schedule_kind TEXT NOT NULL DEFAULT 'every',
+                schedule_value TEXT NOT NULL DEFAULT '',
                 next_run_epoch_seconds REAL NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
+        self._ensure_cron_jobs_columns()
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS heartbeat_runs (
@@ -89,6 +92,14 @@ class SqliteStore:
             """
         )
         self._conn.commit()
+
+    def _ensure_cron_jobs_columns(self) -> None:
+        rows = self._conn.execute("PRAGMA table_info(cron_jobs)").fetchall()
+        existing = {str(row["name"]) for row in rows}
+        if "schedule_kind" not in existing:
+            self._conn.execute("ALTER TABLE cron_jobs ADD COLUMN schedule_kind TEXT NOT NULL DEFAULT 'every'")
+        if "schedule_value" not in existing:
+            self._conn.execute("ALTER TABLE cron_jobs ADD COLUMN schedule_value TEXT NOT NULL DEFAULT ''")
 
     def upsert_channel_identity(
         self,
@@ -204,29 +215,33 @@ class SqliteStore:
         channel: str,
         destination: str,
         interval_seconds: int,
+        schedule_kind: str,
+        schedule_value: str,
         next_run_epoch_seconds: float,
     ) -> None:
         self._conn.execute(
             """
             INSERT INTO cron_jobs (
-                job_id, prompt, channel, destination, interval_seconds, next_run_epoch_seconds
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                job_id, prompt, channel, destination, interval_seconds, schedule_kind, schedule_value, next_run_epoch_seconds
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(job_id) DO UPDATE SET
                 prompt = excluded.prompt,
                 channel = excluded.channel,
                 destination = excluded.destination,
                 interval_seconds = excluded.interval_seconds,
+                schedule_kind = excluded.schedule_kind,
+                schedule_value = excluded.schedule_value,
                 next_run_epoch_seconds = excluded.next_run_epoch_seconds,
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (job_id, prompt, channel, destination, interval_seconds, next_run_epoch_seconds),
+            (job_id, prompt, channel, destination, interval_seconds, schedule_kind, schedule_value, next_run_epoch_seconds),
         )
         self._conn.commit()
 
     def list_due_cron_jobs(self, *, now_epoch_seconds: float) -> list[dict[str, Any]]:
         rows = self._conn.execute(
             """
-            SELECT job_id, prompt, channel, destination, interval_seconds, next_run_epoch_seconds
+            SELECT job_id, prompt, channel, destination, interval_seconds, schedule_kind, schedule_value, next_run_epoch_seconds
             FROM cron_jobs
             WHERE next_run_epoch_seconds <= ?
             ORDER BY next_run_epoch_seconds ASC
@@ -240,6 +255,8 @@ class SqliteStore:
                 "channel": row["channel"],
                 "destination": row["destination"],
                 "interval_seconds": row["interval_seconds"],
+                "schedule_kind": row["schedule_kind"],
+                "schedule_value": row["schedule_value"],
                 "next_run_epoch_seconds": row["next_run_epoch_seconds"],
             }
             for row in rows
@@ -254,6 +271,10 @@ class SqliteStore:
             """,
             (next_run_epoch_seconds, job_id),
         )
+        self._conn.commit()
+
+    def delete_cron_job(self, *, job_id: str) -> None:
+        self._conn.execute("DELETE FROM cron_jobs WHERE job_id = ?", (job_id,))
         self._conn.commit()
 
     def record_heartbeat_run(

@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 
-from claudebot_gateway.agent_runtime import AgentExecutionResult
+from claudebot_gateway.agent_runtime import AgentExecutionRequest, AgentExecutionResult
 
 
 class _CounterWorker:
@@ -102,7 +102,7 @@ def test_gateway_app_heartbeat_agent_uses_runtime_execution(tmp_path: Path):
 
     class _FakeRuntime:
         def __init__(self) -> None:
-            self.calls = []
+            self.calls: list[AgentExecutionRequest] = []
 
         async def execute(self, request):
             self.calls.append(request)
@@ -119,6 +119,8 @@ def test_gateway_app_heartbeat_agent_uses_runtime_execution(tmp_path: Path):
         app._agent_runtime = fake
         response = await app._heartbeat_agent("check", tmp_path / "workspaces" / "heartbeat")
         request = fake.calls[0]
+        assert request.channel is not None
+        assert request.destination is not None
         return response, request.channel, request.destination
 
     text, channel, destination = asyncio.run(_run())
@@ -133,7 +135,7 @@ def test_gateway_app_cron_agent_uses_runtime_execution(tmp_path: Path):
 
     class _FakeRuntime:
         def __init__(self) -> None:
-            self.calls = []
+            self.calls: list[AgentExecutionRequest] = []
 
         async def execute(self, request):
             self.calls.append(request)
@@ -150,6 +152,8 @@ def test_gateway_app_cron_agent_uses_runtime_execution(tmp_path: Path):
         app._agent_runtime = fake
         response = await app._cron_agent("daily", tmp_path / "workspaces" / "cron_job_01")
         request = fake.calls[0]
+        assert request.channel is not None
+        assert request.destination is not None
         return response, request.channel, request.destination
 
     text, channel, destination = asyncio.run(_run())

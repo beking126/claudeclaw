@@ -1,6 +1,7 @@
 from pathlib import Path
 import time
 from typing import Awaitable, Callable
+from datetime import datetime, timezone
 
 from claudebot_gateway.persistence.sqlite_store import SqliteStore
 from claudebot_gateway.workspaces import WorkspaceResolver
@@ -64,16 +65,36 @@ class CronService:
         job_id: str,
         prompt: str,
         target: dict[str, str],
-        interval_seconds: int,
+        interval_seconds: int | None = None,
+        schedule_kind: str = "every",
+        schedule_value: str | None = None,
         run_at_epoch_seconds: float | None = None,
     ) -> None:
+        normalized_kind = schedule_kind.strip().lower()
         first_run = time.time() if run_at_epoch_seconds is None else run_at_epoch_seconds
+        normalized_interval = 0
+        normalized_value = ""
+        if normalized_kind == "every":
+            if interval_seconds is None:
+                raise ValueError("interval_seconds is required for schedule_kind='every'")
+            normalized_interval = max(1, int(interval_seconds))
+            normalized_value = str(normalized_interval)
+        elif normalized_kind == "at":
+            normalized_value = str(first_run)
+        elif normalized_kind == "cron":
+            if not schedule_value:
+                raise ValueError("schedule_value is required for schedule_kind='cron'")
+            normalized_value = schedule_value.strip()
+        else:
+            raise ValueError(f"Unsupported schedule_kind: {schedule_kind}")
         self._store.upsert_cron_job(
             job_id=job_id,
             prompt=prompt,
             channel=target["channel"],
             destination=target["destination"],
-            interval_seconds=interval_seconds,
+            interval_seconds=normalized_interval,
+            schedule_kind=normalized_kind,
+            schedule_value=normalized_value,
             next_run_epoch_seconds=first_run,
         )
 
@@ -94,12 +115,18 @@ class CronService:
                 send_func=send_func,
                 agent_func=agent_func,
             )
-            interval_seconds = int(job["interval_seconds"])
-            next_run = now + max(1, interval_seconds)
-            self._store.update_cron_job_next_run(
-                job_id=str(job["job_id"]),
-                next_run_epoch_seconds=next_run,
-            )
+            job_id = str(job["job_id"])
+            schedule_kind = str(job.get("schedule_kind", "every")).strip().lower()
+            if schedule_kind == "at":
+                self._store.delete_cron_job(job_id=job_id)
+                continue
+            if schedule_kind == "cron":
+                schedule_value = str(job.get("schedule_value", ""))
+                next_run = self._next_cron_epoch_seconds(schedule_value, from_epoch_seconds=now)
+            else:
+                interval_seconds = int(job.get("interval_seconds", 0))
+                next_run = now + max(1, interval_seconds)
+            self._store.update_cron_job_next_run(job_id=job_id, next_run_epoch_seconds=next_run)
         return len(jobs)
 
     def due_job_count(self, *, now_epoch_seconds: float | None = None) -> int:
@@ -111,3 +138,41 @@ class CronService:
         if delivery is None:
             return None
         return {k: "" if v is None else str(v) for k, v in delivery.items()}
+
+    def _next_cron_epoch_seconds(self, expression: str, *, from_epoch_seconds: float) -> float:
+        fields = expression.strip().split()
+        if len(fields) != 5:
+            raise ValueError("Cron expression must have 5 fields")
+        minute, hour, day, month, weekday = fields
+        base = int(from_epoch_seconds // 60) * 60
+        candidate = base + 60
+        max_checks = 525600
+        for _ in range(max_checks):
+            dt = datetime.fromtimestamp(candidate, tz=timezone.utc)
+            cron_weekday = (dt.weekday() + 1) % 7
+            if (
+                self._matches_field(minute, dt.minute, 0, 59)
+                and self._matches_field(hour, dt.hour, 0, 23)
+                and self._matches_field(day, dt.day, 1, 31)
+                and self._matches_field(month, dt.month, 1, 12)
+                and self._matches_field(weekday, cron_weekday, 0, 7)
+            ):
+                return float(candidate)
+            candidate += 60
+        raise ValueError("Unable to find next run time for cron expression")
+
+    def _matches_field(self, field: str, value: int, minimum: int, maximum: int) -> bool:
+        token = field.strip()
+        if token == "*":
+            return True
+        if token.startswith("*/"):
+            step = int(token[2:])
+            if step <= 0:
+                raise ValueError("Cron step must be greater than zero")
+            return value % step == 0
+        target = int(token)
+        if target < minimum or target > maximum:
+            raise ValueError(f"Cron value {target} out of range {minimum}-{maximum}")
+        if maximum == 7 and target == 7:
+            target = 0
+        return value == target
