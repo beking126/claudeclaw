@@ -16,7 +16,7 @@ class ClaudeRuntimeOptions:
     model: str | None = None
     fallback_model: str | None = None
     setting_sources: list[str] | None = None
-    # skills: list[str] = field(default_factory=list)
+    skills: list[str] = field(default_factory=list)
     sub_agents: dict[str, dict[str, object]] = field(default_factory=dict)
     env: dict[str, str] = field(default_factory=dict)
     extra_args: dict[str, str | None] = field(default_factory=dict)

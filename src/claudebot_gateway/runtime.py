@@ -150,7 +150,7 @@ class GatewayApp:
                     "text": demo_text,
                 }
             )
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(50)
         await self._runtime.stop()
 
     async def run_forever(self) -> None:

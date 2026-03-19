@@ -79,6 +79,8 @@ class ClaudeSdkAdapter:
             options_payload["hooks"] = None
         if not options_payload["mcp_servers"]:
             options_payload["mcp_servers"] = {}
+        # Remove `skills` from options_payload as it's not supported by claude-agent-sdk
+        options_payload.pop("skills", None)
         try:
             sdk_module = import_module("claude_agent_sdk")
         except ImportError:

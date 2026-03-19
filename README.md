@@ -92,6 +92,11 @@ The following items are planned to align fully with `docs/PRD_GATEWAY_DAEMON.md`
 - Replace placeholder/default turn handling with full Claude Agent SDK orchestration.
 - Integrate provider/tool loops, richer context composition, and stronger delivery semantics.
 
+### Session management
+- Add session state persistence per-channel or per-workspace.
+- Extend session context to include channel-specific settings.
+- Can load SOUL.md/USER.md/TOOLS.md files from workspace root. These files are used as System Prompt and User Prompt respectively.
+
 ### Scheduling
 - Extend cron model to support:
   - one-shot `at`,
