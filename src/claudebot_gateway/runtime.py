@@ -197,7 +197,7 @@ class GatewayApp:
         interval = max(1, self._config.heartbeat_interval_seconds)
         while not stop_event.is_set():
             source_text = self._heartbeat.load_source_text()
-            await self._heartbeat.run_once(source_text=source_text, agent_func=self._noop_agent)
+            await self._heartbeat.run_once(source_text=source_text, agent_func=self._heartbeat_agent)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=float(interval))
             except TimeoutError:
@@ -205,7 +205,7 @@ class GatewayApp:
 
     async def _cron_worker(self, stop_event: asyncio.Event) -> None:
         while not stop_event.is_set():
-            await self._cron.run_due_jobs(send_func=self._cron_send, agent_func=self._noop_agent)
+            await self._cron.run_due_jobs(send_func=self._cron_send, agent_func=self._cron_agent)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=1.0)
             except TimeoutError:
@@ -214,9 +214,43 @@ class GatewayApp:
     async def _cron_send(self, message: dict[str, str]) -> None:
         await self._bus.publish_outbound(message)
 
-    async def _noop_agent(self, prompt: str, workspace: Path) -> str:
-        _ = (prompt, workspace)
-        return "ok"
+    async def _cron_agent(self, prompt: str, workspace: Path) -> str:
+        return await self._execute_background_prompt(
+            prompt=prompt,
+            workspace=workspace,
+            channel="system",
+            destination=f"cron:{workspace.name}",
+            metadata={"origin": "cron", "workspace_key": workspace.name},
+        )
+
+    async def _heartbeat_agent(self, prompt: str, workspace: Path) -> str:
+        return await self._execute_background_prompt(
+            prompt=prompt,
+            workspace=workspace,
+            channel="system",
+            destination="heartbeat:tick",
+            metadata={"origin": "heartbeat", "workspace_key": workspace.name},
+        )
+
+    async def _execute_background_prompt(
+        self,
+        *,
+        prompt: str,
+        workspace: Path,
+        channel: str,
+        destination: str,
+        metadata: dict[str, str],
+    ) -> str:
+        result = await self._agent_runtime.execute(
+            AgentExecutionRequest(
+                prompt=prompt,
+                workspace=workspace,
+                channel=channel,
+                destination=destination,
+                metadata=metadata,
+            )
+        )
+        return result.text
 
     async def execute_prompt(self, *, prompt: str, workspace: Path | None = None) -> str:
         selected_workspace = workspace or self._workspace_resolver.main()

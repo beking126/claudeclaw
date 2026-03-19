@@ -1,6 +1,8 @@
 import asyncio
 from pathlib import Path
 
+from claudebot_gateway.agent_runtime import AgentExecutionResult
+
 
 class _CounterWorker:
     def __init__(self):
@@ -92,3 +94,65 @@ def test_gateway_app_init_fails_for_unsupported_runtime_provider(tmp_path: Path)
         assert False
     except UnsupportedRuntimeProviderError as exc:
         assert "not-supported" in str(exc)
+
+
+def test_gateway_app_heartbeat_agent_uses_runtime_execution(tmp_path: Path):
+    from claudebot_gateway.config import GatewayConfig
+    from claudebot_gateway.runtime import GatewayApp
+
+    class _FakeRuntime:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def execute(self, request):
+            self.calls.append(request)
+            return AgentExecutionResult(text="hb-ok", provider="test")
+
+    async def _run() -> tuple[str, str, str]:
+        app = GatewayApp(
+            config=GatewayConfig(
+                workspace_root=tmp_path / "workspaces",
+                sqlite_path=tmp_path / "state" / "gateway.db",
+            )
+        )
+        fake = _FakeRuntime()
+        app._agent_runtime = fake
+        response = await app._heartbeat_agent("check", tmp_path / "workspaces" / "heartbeat")
+        request = fake.calls[0]
+        return response, request.channel, request.destination
+
+    text, channel, destination = asyncio.run(_run())
+    assert text == "hb-ok"
+    assert channel == "system"
+    assert destination == "heartbeat:tick"
+
+
+def test_gateway_app_cron_agent_uses_runtime_execution(tmp_path: Path):
+    from claudebot_gateway.config import GatewayConfig
+    from claudebot_gateway.runtime import GatewayApp
+
+    class _FakeRuntime:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def execute(self, request):
+            self.calls.append(request)
+            return AgentExecutionResult(text=f"runtime:{request.prompt}", provider="test")
+
+    async def _run() -> tuple[str, str, str]:
+        app = GatewayApp(
+            config=GatewayConfig(
+                workspace_root=tmp_path / "workspaces",
+                sqlite_path=tmp_path / "state" / "gateway.db",
+            )
+        )
+        fake = _FakeRuntime()
+        app._agent_runtime = fake
+        response = await app._cron_agent("daily", tmp_path / "workspaces" / "cron_job_01")
+        request = fake.calls[0]
+        return response, request.channel, request.destination
+
+    text, channel, destination = asyncio.run(_run())
+    assert text == "runtime:daily"
+    assert channel == "system"
+    assert destination == "cron:cron_job_01"
