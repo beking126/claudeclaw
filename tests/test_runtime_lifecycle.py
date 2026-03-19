@@ -163,7 +163,7 @@ def test_gateway_app_cron_agent_uses_runtime_execution(tmp_path: Path):
 
 
 def test_gateway_app_wires_enabled_extended_channels(tmp_path: Path):
-    from claudebot_gateway.config import ChannelConfig, ChannelToggle, GatewayConfig, TelegramChannelConfig
+    from claudebot_gateway.config import ChannelConfig, ChannelToggle, FeishuChannelConfig, GatewayConfig, TelegramChannelConfig
     from claudebot_gateway.runtime import GatewayApp
 
     app = GatewayApp(
@@ -180,7 +180,16 @@ def test_gateway_app_wires_enabled_extended_channels(tmp_path: Path):
                     max_backoff_seconds=3.0,
                 ),
                 discord=ChannelToggle(enabled=True),
-                feishu=ChannelToggle(enabled=True),
+                feishu=FeishuChannelConfig(
+                    enabled=True,
+                    app_id="fei-app",
+                    app_secret="fei-secret",
+                    verify_token="verify-me",
+                    encrypt_key="enc-key",
+                    send_max_attempts=6,
+                    base_backoff_seconds=0.4,
+                    max_backoff_seconds=2.4,
+                ),
                 whatsapp=ChannelToggle(enabled=True),
                 slack=ChannelToggle(enabled=True),
             ),
@@ -197,3 +206,25 @@ def test_gateway_app_wires_enabled_extended_channels(tmp_path: Path):
     assert telegram._send_max_attempts == 7
     assert telegram._base_backoff_seconds == 0.25
     assert telegram._max_backoff_seconds == 3.0
+    feishu = app._adapters["feishu"]
+    assert feishu._app_id == "fei-app"
+    assert feishu._app_secret == "fei-secret"
+    assert feishu._verify_token == "verify-me"
+    assert feishu._encrypt_key == "enc-key"
+    assert feishu._send_max_attempts == 6
+
+
+def test_gateway_app_wires_health_http_host_and_port(tmp_path: Path):
+    from claudebot_gateway.config import GatewayConfig, HealthHttpConfig
+    from claudebot_gateway.runtime import GatewayApp
+
+    app = GatewayApp(
+        config=GatewayConfig(
+            workspace_root=tmp_path / "workspaces",
+            sqlite_path=tmp_path / "state" / "gateway.db",
+            health_http=HealthHttpConfig(enabled=True, host="127.0.0.1", port=0),
+        )
+    )
+    assert app._health._http_enabled is True
+    assert app._health._host == "127.0.0.1"
+    assert app._health._port == 0

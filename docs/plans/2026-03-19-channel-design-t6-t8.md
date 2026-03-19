@@ -3,9 +3,9 @@
 ## Summary
 
 This document redefines channel architecture for:
-- T6: additional production adapters (Discord, Feishu, WhatsApp bridge, Slack bridge)
+- T6: additional production adapters (Discord, WhatsApp bridge, Slack bridge)
 - T7: robust Telegram integration with reconnect/backoff
-- T8: CLI channel-status and cron operations aligned with operational needs
+- T8: Feishu production channel implementation (webhook/event path, outbound delivery, resilience)
 
 T5 is intentionally deferred in this iteration.  
 Design is grounded on current gateway runtime and external channel examples under `examples/channels/`.
@@ -91,29 +91,22 @@ Policy should be adapter-agnostic and reusable via a small utility module (for T
 - Ensure outbound send path handles transient errors and reports metrics/status.
 - Maintain message-to-destination mapping consistency for replies.
 
-## Feishu (T6)
-- Adopt websocket-style long connection pattern (as seen in external example) with thread-safe or async-safe bridging to bus.
-- Add dedup strategy for message IDs to avoid duplicate processing on reconnect.
+## Feishu (T8)
+- Implement Feishu as a first-class production channel using explicit adapter lifecycle (`start/stop/send/process_raw_message`).
+- Prefer a webhook/event callback model for inbound communication and bridge validated events into `MessageBus`.
+- Add event verification and replay-safe dedup strategy for message IDs.
+- Add outbound send behavior with retry/backoff and health signals.
 
 ## Discord / Slack bridge / WhatsApp bridge (T6)
 - Implement as separate adapters with same manager contract.
 - WhatsApp remains bridge-driven; gateway must degrade gracefully when bridge unavailable.
 - Keep platform-specific payload handling inside adapters; publish normalized inbound envelopes only.
 
-## CLI Design for T8
+## CLI Scope Adjustment
 
-## Channel status commands
-- Add `channels status` style command under existing CLI namespace conventions.
-- Output should include:
-  - enabled channels,
-  - running/degraded/stopped state,
-  - last error (sanitized),
-  - reconnect attempt counters.
-
-## Cron management commands
-- Add cron add/list/remove commands integrated with current `CronService` schedule model (`at`, `every`, `cron`).
-- Validate channel/destination presence at command boundary.
-- Keep command outputs deterministic and testable (stable text and exit codes).
+- `cli` channel is treated as a local/dev shim and not a production transport milestone target.
+- T8 does not prioritize new CLI transport behavior.
+- CLI may later gain a dedicated endpoint-backed transport mode, but this is outside current T8 scope.
 
 ## Data Flow
 
@@ -151,16 +144,19 @@ Policy should be adapter-agnostic and reusable via a small utility module (for T
   - one channel failure does not break others,
   - status output reflects channel state.
 - `tests/test_cli_gateway.py`
-  - channel status commands,
-  - cron add/list/remove commands and validation behavior.
+  - config/runtime startup behavior remains stable.
+- new Feishu-focused integration tests:
+  - verified inbound event normalization into bus,
+  - outbound delivery behavior with retry/backoff,
+  - dedup behavior for repeated event IDs.
 
 ## Migration Plan (Execution Order)
 
 1. Introduce new adapter protocol + ChannelManager lifecycle/status internals.
 2. Add compatibility shim for existing poll-only adapters.
 3. Implement robust Telegram adapter with reconnect/backoff.
-4. Add Feishu/Discord/Slack/WhatsApp bridge adapters behind config toggles.
-5. Add CLI channel-status and cron management commands.
+4. Add Discord/Slack/WhatsApp bridge adapters behind config toggles.
+5. Implement Feishu production channel (config surface, verification, inbound/outbound, resilience).
 6. Remove deprecated poll-only manager path after adapter migration is complete.
 
 ## Non-Goals for This Design Slice
@@ -174,8 +170,105 @@ Policy should be adapter-agnostic and reusable via a small utility module (for T
 - `src/claudebot_gateway/channels/` (new adapters + shared helper utilities)
 - `src/claudebot_gateway/channel_manager.py` (lifecycle supervision and status)
 - `src/claudebot_gateway/runtime.py` (adapter wiring and status integration)
-- `src/claudebot_gateway/cli.py` (channels status + cron add/list/remove)
+- `src/claudebot_gateway/channels/feishu.py` (T8 production implementation)
+- `src/claudebot_gateway/config.py` (Feishu config surface)
+- `src/claudebot_gateway/runtime.py` (Feishu wiring and lifecycle integration)
+- `src/claudebot_gateway/cli.py` (retain orchestration and config-loading support)
 - `tests/test_channel_manager.py`
 - adapter-specific test modules
+- `tests/test_feishu_channel.py`
 - `tests/test_cli_gateway.py`
 - `tests/test_e2e_gateway.py`
+
+## T8 Detailed Execution Plan (Feishu First)
+
+### Task 1: Add Feishu config surface
+
+**Files**
+- Modify: `src/claudebot_gateway/config.py`
+- Test: `tests/test_models_config.py`
+
+**Steps**
+1. Write failing test for `channels.feishu` config fields (`app_id`, `app_secret`, `verify_token`, `encrypt_key`, retry/backoff knobs).
+2. Run targeted test and confirm failure due to missing fields.
+3. Implement minimal `FeishuChannelConfig` dataclass and wire into `ChannelConfig`.
+4. Run targeted test and confirm pass.
+
+### Task 2: Wire runtime construction from config
+
+**Files**
+- Modify: `src/claudebot_gateway/runtime.py`
+- Test: `tests/test_runtime_lifecycle.py`
+
+**Steps**
+1. Write failing test asserting Feishu adapter receives config values from `GatewayConfig`.
+2. Run targeted test and confirm failure.
+3. Update runtime Feishu adapter construction to pass explicit config values.
+4. Run targeted test and confirm pass.
+
+### Task 3: Implement Feishu adapter lifecycle and inbound normalization
+
+**Files**
+- Modify: `src/claudebot_gateway/channels/feishu.py`
+- Create/Modify: `tests/test_feishu_channel.py`
+
+**Steps**
+1. Write failing tests for:
+   - `start/stop/health` lifecycle state,
+   - inbound webhook/event verification path,
+   - inbound normalization to bus envelope (`channel`, `destination`, `text`, optional sender/metadata),
+   - replay dedup by event/message id.
+2. Run targeted tests and confirm failures.
+3. Implement minimal adapter with:
+   - lifecycle state tracking,
+   - verification helpers,
+   - `process_raw_message` normalization,
+   - dedup cache strategy.
+4. Re-run targeted tests and confirm pass.
+
+### Task 4: Implement outbound send with resilience
+
+**Files**
+- Modify: `src/claudebot_gateway/channels/feishu.py`
+- Modify: `tests/test_feishu_channel.py`
+
+**Steps**
+1. Write failing tests for outbound send success, retry/backoff behavior, and failure signaling (`last_error`, reconnect/send attempts).
+2. Run targeted tests and confirm failures.
+3. Implement outbound sender + retry/backoff loop using existing adapter conventions.
+4. Re-run targeted tests and confirm pass.
+
+### Task 5: Integrate with manager/status and regression suite
+
+**Files**
+- Modify: `tests/test_channel_manager.py`
+- Modify: `tests/test_e2e_gateway.py`
+- Modify: `tests/test_cli_gateway.py` (only if status output expectations change)
+
+**Steps**
+1. Add failing tests for Feishu enabled runtime path and degraded-state behavior isolation.
+2. Run targeted tests and confirm failures.
+3. Implement minimal integration glue (if any gaps remain after adapter/runtime changes).
+4. Re-run targeted tests and confirm pass.
+
+### Task 6: Final validation gate
+
+**Steps**
+1. Run focused test commands:
+   - `uv run pytest -q tests/test_feishu_channel.py`
+   - `uv run pytest -q tests/test_runtime_lifecycle.py tests/test_channel_manager.py`
+2. Run regression command:
+   - `uv run pytest -q tests/test_cli_gateway.py tests/test_models_config.py tests/test_agent_dispatch_flow.py tests/test_telegram_channel.py tests/test_e2e_gateway.py`
+3. Run quality gates:
+   - `uv run ruff check src tests`
+   - `uv run mypy src tests`
+4. Confirm diagnostics are clean before closing T8.
+
+## T8 Acceptance Criteria (Updated)
+
+- Feishu can be enabled and configured through `./claudebot/config.json` via `GatewayConfig`.
+- Feishu adapter implements `start/stop/send/process_raw_message/health` and integrates with `ChannelManager`.
+- Inbound Feishu events are verified, deduplicated, normalized, and published to `MessageBus`.
+- Outbound Feishu sends retry transient failures with bounded backoff and expose clear health/error state.
+- One Feishu channel failure does not crash runtime or other channels.
+- Tests, lint, typecheck, and diagnostics are all green.

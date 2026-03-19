@@ -133,7 +133,16 @@ class GatewayApp:
             self._adapters["discord"] = discord
             channels["discord"] = discord
         if config.channels.feishu.enabled:
-            feishu = FeishuChannel()
+            feishu = FeishuChannel(
+                bus=self._bus,
+                app_id=config.channels.feishu.app_id,
+                app_secret=config.channels.feishu.app_secret,
+                verify_token=config.channels.feishu.verify_token,
+                encrypt_key=config.channels.feishu.encrypt_key,
+                send_max_attempts=config.channels.feishu.send_max_attempts,
+                base_backoff_seconds=config.channels.feishu.base_backoff_seconds,
+                max_backoff_seconds=config.channels.feishu.max_backoff_seconds,
+            )
             self._adapters["feishu"] = feishu
             channels["feishu"] = feishu
         if config.channels.whatsapp.enabled:
@@ -165,6 +174,8 @@ class GatewayApp:
         self._health = HealthService(
             runtime=self._runtime,
             http_enabled=config.health_http.enabled,
+            host=config.health_http.host,
+            port=config.health_http.port,
             signal_provider=self._health_signals,
         )
 
@@ -194,17 +205,20 @@ class GatewayApp:
         await self._channel_manager.start_all()
         await self._runtime.start()
         await self._health.start_http_if_enabled()
-        if demo_text:
-            await self._bus.publish_inbound(
-                {
-                    "channel": "cli",
-                    "destination": "cli:stdout",
-                    "text": demo_text,
-                }
-            )
-        await asyncio.sleep(50)
-        await self._runtime.stop()
-        await self._channel_manager.stop_all()
+        try:
+            if demo_text:
+                await self._bus.publish_inbound(
+                    {
+                        "channel": "cli",
+                        "destination": "cli:stdout",
+                        "text": demo_text,
+                    }
+                )
+            await asyncio.sleep(50)
+        finally:
+            await self._health.stop_http_if_started()
+            await self._runtime.stop()
+            await self._channel_manager.stop_all()
 
     async def run_forever(self) -> None:
         await self._channel_manager.start_all()
@@ -213,6 +227,7 @@ class GatewayApp:
         try:
             await asyncio.Event().wait()
         finally:
+            await self._health.stop_http_if_started()
             await self._runtime.stop()
             await self._channel_manager.stop_all()
 

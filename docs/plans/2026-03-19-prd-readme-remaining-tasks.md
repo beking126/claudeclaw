@@ -81,7 +81,7 @@ Each task maps to one or more gap IDs and represents remaining implementation wo
   - Untrusted channel metadata is filtered/validated before prompt/runtime handoff.
 - Dependencies: none
 
-## T5 — Implement workspace restriction policy wiring for runtime/tool surfaces
+## [SKIP] T5 — Implement workspace restriction policy wiring for runtime/tool surfaces
 
 - Gap mapping: G8
 - Priority: P0
@@ -167,7 +167,7 @@ Each task maps to one or more gap IDs and represents remaining implementation wo
   - Enabling health HTTP starts a real server endpoint and returns runtime/worker signal status.
 - Dependencies: none
 
-## T10 — Add Docker runtime support artifacts
+## [SKIP] T10 — Add Docker runtime support artifacts
 
 - Gap mapping: G9
 - Priority: P2
