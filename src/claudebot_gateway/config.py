@@ -32,6 +32,7 @@ class AgentRuntimeConfig:
 @dataclass(slots=True)
 class ChannelToggle:
     enabled: bool
+    allowed_senders: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

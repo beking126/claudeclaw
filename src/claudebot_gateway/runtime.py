@@ -119,7 +119,11 @@ class GatewayApp:
             self._adapters["telegram"] = telegram
             channels["telegram"] = telegram
         self._channel_manager = ChannelManager(channels=channels)
-        self._agent_runner = AgentRunner(runtime=self._agent_runtime, default_workspace=self._workspace_resolver.main())
+        self._agent_runner = AgentRunner(
+            runtime=self._agent_runtime,
+            default_workspace=self._workspace_resolver.main(),
+            channel_allowed_senders=self._channel_allowed_senders(config),
+        )
         self._dispatcher = OutboundDispatcher(adapters=self._adapters)
         self._cron = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
         self._heartbeat = HeartbeatService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
@@ -138,6 +142,16 @@ class GatewayApp:
             http_enabled=config.health_http.enabled,
             signal_provider=self._health_signals,
         )
+
+    def _channel_allowed_senders(self, config: GatewayConfig) -> dict[str, set[str]]:
+        channel_senders: dict[str, set[str]] = {}
+        cli_allowed = {sender for sender in config.channels.cli.allowed_senders if sender}
+        if cli_allowed:
+            channel_senders["cli"] = cli_allowed
+        telegram_allowed = {sender for sender in config.channels.telegram.allowed_senders if sender}
+        if telegram_allowed:
+            channel_senders["telegram"] = telegram_allowed
+        return channel_senders
 
     async def run_once(self, demo_text: str = "") -> None:
         await self._runtime.start()

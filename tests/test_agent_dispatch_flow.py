@@ -24,6 +24,15 @@ class _FailingRuntime:
         raise RuntimeError("boom")
 
 
+class _TrackingRuntime:
+    def __init__(self):
+        self.requests = []
+
+    async def execute(self, request):
+        self.requests.append(request)
+        return AgentExecutionResult(text=f"ok:{request.prompt}", provider="test")
+
+
 def test_inbound_generates_outbound_with_target_channel():
     from claudebot_gateway.agent_runner import AgentRunner
     from claudebot_gateway.outbound_dispatcher import OutboundDispatcher
@@ -57,3 +66,65 @@ def test_runtime_failure_still_emits_routed_outbound_message():
     assert outbound["channel"] == "telegram"
     assert outbound["destination"] == "chat:9"
     assert outbound["text"] == "Agent execution failed. Try again shortly."
+
+
+def test_sender_not_in_allow_list_is_rejected_without_runtime_call():
+    from claudebot_gateway.agent_runner import AgentRunner
+
+    async def _run() -> tuple[dict[str, str], int]:
+        bus = MessageBus()
+        runtime = _TrackingRuntime()
+        runner = AgentRunner(
+            runtime=runtime,
+            default_workspace=Path("workspaces/main"),
+            channel_allowed_senders={"telegram": {"trusted-user"}},
+        )
+        await bus.publish_inbound(
+            {
+                "channel": "telegram",
+                "destination": "chat:2",
+                "sender": "untrusted-user",
+                "text": "hi",
+            }
+        )
+        outbound = await runner.process_once(bus)
+        return outbound, len(runtime.requests)
+
+    outbound, request_count = asyncio.run(_run())
+    assert request_count == 0
+    assert outbound["text"] == "Sender is not allowed for this channel."
+
+
+def test_runtime_metadata_is_sanitized_before_execution():
+    from claudebot_gateway.agent_runner import AgentRunner
+
+    async def _run() -> dict[str, object]:
+        bus = MessageBus()
+        runtime = _TrackingRuntime()
+        runner = AgentRunner(runtime=runtime, default_workspace=Path("workspaces/main"))
+        await bus.publish_inbound(
+            {
+                "channel": "telegram",
+                "destination": "chat:3",
+                "sender": "trusted-user",
+                "text": "hi",
+                "token": "secret-token-value",
+                "authorization": "Bearer abc",
+                "extra": {"nested": "drop-me"},
+                "meta_list": ["a", "b"],
+                "count": 2,
+            }
+        )
+        await runner.process_once(bus)
+        metadata = runtime.requests[0].metadata or {}
+        return metadata
+
+    metadata = asyncio.run(_run())
+    assert metadata["channel"] == "telegram"
+    assert metadata["destination"] == "chat:3"
+    assert metadata["sender"] == "trusted-user"
+    assert metadata["count"] == 2
+    assert "token" not in metadata
+    assert "authorization" not in metadata
+    assert "extra" not in metadata
+    assert "meta_list" not in metadata

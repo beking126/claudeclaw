@@ -15,6 +15,8 @@ def test_config_defaults(tmp_path: Path):
 
     assert config.channels.cli.enabled is True
     assert config.channels.telegram.enabled is False
+    assert config.channels.cli.allowed_senders == []
+    assert config.channels.telegram.allowed_senders == []
     assert config.message_bus.inbound_maxsize == 1000
     assert config.agent_runtime.provider == "claude"
     assert config.agent_runtime.claude.tools == []
