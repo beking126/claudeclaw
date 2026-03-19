@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 import time
 from typing import Awaitable, Callable
@@ -12,9 +13,20 @@ AgentFunc = Callable[[str, Path], Awaitable[str]]
 
 
 class CronService:
-    def __init__(self, db_path: Path, workspace_root: Path):
+    def __init__(
+        self,
+        db_path: Path,
+        workspace_root: Path,
+        *,
+        delivery_max_attempts: int = 3,
+        delivery_retry_backoff_seconds: float = 0.05,
+        delivery_retry_backoff_max_seconds: float = 0.5,
+    ):
         self._store = SqliteStore(db_path=db_path)
         self._resolver = WorkspaceResolver(workspace_root)
+        self._delivery_max_attempts = max(1, delivery_max_attempts)
+        self._delivery_retry_backoff_seconds = max(0.0, delivery_retry_backoff_seconds)
+        self._delivery_retry_backoff_max_seconds = max(0.0, delivery_retry_backoff_max_seconds)
 
     async def run_job_once(
         self,
@@ -31,16 +43,13 @@ class CronService:
         failure_reason: str | None = None
         delivery_status = "ok"
         run_status = "ok"
-        try:
-            await send_func(
-                {
-                    "channel": target["channel"],
-                    "destination": target["destination"],
-                    "text": report,
-                }
-            )
-        except Exception as exc:
-            failure_reason = str(exc)
+        message = {
+            "channel": target["channel"],
+            "destination": target["destination"],
+            "text": report,
+        }
+        failure_reason = await self._send_with_retry(message=message, send_func=send_func)
+        if failure_reason is not None:
             delivery_status = "dropped"
             run_status = "error"
         self._store.record_cron_run(
@@ -176,3 +185,21 @@ class CronService:
         if maximum == 7 and target == 7:
             target = 0
         return value == target
+
+    async def _send_with_retry(self, *, message: dict[str, str], send_func: SendFunc) -> str | None:
+        failure_reason: str | None = None
+        for attempt in range(1, self._delivery_max_attempts + 1):
+            try:
+                await send_func(message)
+                return None
+            except Exception as exc:
+                failure_reason = str(exc)
+                if attempt == self._delivery_max_attempts:
+                    return failure_reason
+                delay = min(
+                    self._delivery_retry_backoff_seconds * attempt,
+                    self._delivery_retry_backoff_max_seconds,
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)
+        return failure_reason

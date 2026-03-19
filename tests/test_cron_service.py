@@ -128,3 +128,37 @@ def test_cron_scheduler_supports_cron_expression_jobs(tmp_path: Path):
     assert first == 1
     assert second == 0
     assert third == 1
+
+
+def test_cron_delivery_retries_and_recovers_from_transient_failure(tmp_path: Path):
+    from claudebot_gateway.cron_service import CronService
+
+    async def _run() -> tuple[dict[str, str], dict[str, str] | None, int]:
+        service = CronService(db_path=tmp_path / "gateway.db", workspace_root=tmp_path / "workspaces")
+        attempts = 0
+
+        async def send(_: dict[str, str]) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise RuntimeError("temporary channel outage")
+
+        async def agent(_: str, __: Path) -> str:
+            return "report"
+
+        result = await service.run_job_once(
+            job_id="job-retry-01",
+            prompt="retry me",
+            target={"channel": "telegram", "destination": "chat:retry"},
+            send_func=send,
+            agent_func=agent,
+        )
+        delivery = service.get_last_delivery("job-retry-01")
+        return result, delivery, attempts
+
+    result, delivery, attempts = asyncio.run(_run())
+    assert attempts == 3
+    assert result["delivery_status"] == "ok"
+    assert result["run_status"] == "ok"
+    assert delivery is not None
+    assert delivery["status"] == "ok"
