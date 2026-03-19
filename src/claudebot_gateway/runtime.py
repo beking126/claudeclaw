@@ -8,7 +8,11 @@ from claudebot_gateway.agent_runtime import AgentExecutionRequest, create_agent_
 from claudebot_gateway.agent_runner import AgentRunner
 from claudebot_gateway.channel_manager import ChannelManager
 from claudebot_gateway.channels.cli import CliChannel
+from claudebot_gateway.channels.discord import DiscordChannel
+from claudebot_gateway.channels.feishu import FeishuChannel
+from claudebot_gateway.channels.slack import SlackBridgeChannel
 from claudebot_gateway.channels.telegram import TelegramChannel
+from claudebot_gateway.channels.whatsapp import WhatsAppBridgeChannel
 from claudebot_gateway.config import GatewayConfig
 from claudebot_gateway.cron_service import CronService
 from claudebot_gateway.health import HealthService
@@ -115,9 +119,31 @@ class GatewayApp:
             self._adapters["cli"] = cli
             channels["cli"] = cli
         if config.channels.telegram.enabled:
-            telegram = TelegramChannel()
+            telegram = TelegramChannel(
+                bus=self._bus,
+                token=config.channels.telegram.bot_token,
+                send_max_attempts=config.channels.telegram.send_max_attempts,
+                base_backoff_seconds=config.channels.telegram.base_backoff_seconds,
+                max_backoff_seconds=config.channels.telegram.max_backoff_seconds,
+            )
             self._adapters["telegram"] = telegram
             channels["telegram"] = telegram
+        if config.channels.discord.enabled:
+            discord = DiscordChannel()
+            self._adapters["discord"] = discord
+            channels["discord"] = discord
+        if config.channels.feishu.enabled:
+            feishu = FeishuChannel()
+            self._adapters["feishu"] = feishu
+            channels["feishu"] = feishu
+        if config.channels.whatsapp.enabled:
+            whatsapp = WhatsAppBridgeChannel()
+            self._adapters["whatsapp"] = whatsapp
+            channels["whatsapp"] = whatsapp
+        if config.channels.slack.enabled:
+            slack = SlackBridgeChannel()
+            self._adapters["slack"] = slack
+            channels["slack"] = slack
         self._channel_manager = ChannelManager(channels=channels)
         self._agent_runner = AgentRunner(
             runtime=self._agent_runtime,
@@ -129,7 +155,6 @@ class GatewayApp:
         self._heartbeat = HeartbeatService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
         self._runtime = GatewayRuntime(
             workers=[
-                self._channel_worker,
                 self._agent_worker,
                 self._dispatch_worker,
                 self._cron_worker,
@@ -151,9 +176,22 @@ class GatewayApp:
         telegram_allowed = {sender for sender in config.channels.telegram.allowed_senders if sender}
         if telegram_allowed:
             channel_senders["telegram"] = telegram_allowed
+        discord_allowed = {sender for sender in config.channels.discord.allowed_senders if sender}
+        if discord_allowed:
+            channel_senders["discord"] = discord_allowed
+        feishu_allowed = {sender for sender in config.channels.feishu.allowed_senders if sender}
+        if feishu_allowed:
+            channel_senders["feishu"] = feishu_allowed
+        whatsapp_allowed = {sender for sender in config.channels.whatsapp.allowed_senders if sender}
+        if whatsapp_allowed:
+            channel_senders["whatsapp"] = whatsapp_allowed
+        slack_allowed = {sender for sender in config.channels.slack.allowed_senders if sender}
+        if slack_allowed:
+            channel_senders["slack"] = slack_allowed
         return channel_senders
 
     async def run_once(self, demo_text: str = "") -> None:
+        await self._channel_manager.start_all()
         await self._runtime.start()
         await self._health.start_http_if_enabled()
         if demo_text:
@@ -166,14 +204,17 @@ class GatewayApp:
             )
         await asyncio.sleep(50)
         await self._runtime.stop()
+        await self._channel_manager.stop_all()
 
     async def run_forever(self) -> None:
+        await self._channel_manager.start_all()
         await self._runtime.start()
         await self._health.start_http_if_enabled()
         try:
             await asyncio.Event().wait()
         finally:
             await self._runtime.stop()
+            await self._channel_manager.stop_all()
 
     def status(self) -> dict[str, object]:
         return self._health.snapshot()
@@ -185,11 +226,6 @@ class GatewayApp:
             "due_cron_jobs": self._cron.due_job_count(),
             "last_heartbeat_run": self._heartbeat.get_last_run(),
         }
-
-    async def _channel_worker(self, stop_event: asyncio.Event) -> None:
-        while not stop_event.is_set():
-            await self._channel_manager.poll_once_all()
-            await asyncio.sleep(0.05)
 
     async def _agent_worker(self, stop_event: asyncio.Event) -> None:
         while not stop_event.is_set():

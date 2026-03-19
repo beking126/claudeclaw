@@ -160,3 +160,40 @@ def test_gateway_app_cron_agent_uses_runtime_execution(tmp_path: Path):
     assert text == "runtime:daily"
     assert channel == "system"
     assert destination == "cron:cron_job_01"
+
+
+def test_gateway_app_wires_enabled_extended_channels(tmp_path: Path):
+    from claudebot_gateway.config import ChannelConfig, ChannelToggle, GatewayConfig, TelegramChannelConfig
+    from claudebot_gateway.runtime import GatewayApp
+
+    app = GatewayApp(
+        config=GatewayConfig(
+            workspace_root=tmp_path / "workspaces",
+            sqlite_path=tmp_path / "state" / "gateway.db",
+            channels=ChannelConfig(
+                cli=ChannelToggle(enabled=True),
+                telegram=TelegramChannelConfig(
+                    enabled=True,
+                    bot_token="tg-token",
+                    send_max_attempts=7,
+                    base_backoff_seconds=0.25,
+                    max_backoff_seconds=3.0,
+                ),
+                discord=ChannelToggle(enabled=True),
+                feishu=ChannelToggle(enabled=True),
+                whatsapp=ChannelToggle(enabled=True),
+                slack=ChannelToggle(enabled=True),
+            ),
+        )
+    )
+    assert "cli" in app._adapters
+    assert "telegram" in app._adapters
+    assert "discord" in app._adapters
+    assert "feishu" in app._adapters
+    assert "whatsapp" in app._adapters
+    assert "slack" in app._adapters
+    telegram = app._adapters["telegram"]
+    assert telegram._token == "tg-token"
+    assert telegram._send_max_attempts == 7
+    assert telegram._base_backoff_seconds == 0.25
+    assert telegram._max_backoff_seconds == 3.0

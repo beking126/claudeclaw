@@ -3,7 +3,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from claudebot_gateway.config import GatewayConfig
+from claudebot_gateway.config import load_gateway_config
 from claudebot_gateway.runtime import GatewayApp, GatewayRuntime
 
 _LOGGER = logging.getLogger("claudebot_gateway.cli")
@@ -50,32 +50,33 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     gateway = subparsers.add_parser("gateway")
-    gateway.add_argument("--workspace-root", default="workspaces")
-    gateway.add_argument("--db-path", default="state/gateway.db")
+    gateway.add_argument("--workspace-root", default=None)
+    gateway.add_argument("--db-path", default=None)
     gateway.add_argument("--once", action="store_true")
     gateway.add_argument("--demo-text", default="")
 
     status = subparsers.add_parser("status")
-    status.add_argument("--workspace-root", default="workspaces")
-    status.add_argument("--db-path", default="state/gateway.db")
+    status.add_argument("--workspace-root", default=None)
+    status.add_argument("--db-path", default=None)
 
     agent = subparsers.add_parser("agent")
     agent.add_argument("--prompt", required=True)
-    agent.add_argument("--workspace-root", default="workspaces")
+    agent.add_argument("--workspace-root", default=None)
     agent.add_argument("--workspace", default="main")
-    agent.add_argument("--db-path", default="state/gateway.db")
+    agent.add_argument("--db-path", default=None)
 
     args = parser.parse_args(argv)
     _configure_logging(args.verbose)
     _LOGGER.debug("verbose_mode_enabled=true")
     if args.command == "status":
-        workspace_root = Path(args.workspace_root)
-        sqlite_path = Path(args.db_path)
+        config = load_gateway_config(
+            workspace_root=Path(args.workspace_root) if args.workspace_root else None,
+            sqlite_path=Path(args.db_path) if args.db_path else None,
+        )
+        workspace_root = config.workspace_root
+        sqlite_path = config.sqlite_path
         app = GatewayApp(
-            config=GatewayConfig(
-                workspace_root=workspace_root,
-                sqlite_path=sqlite_path,
-            )
+            config=config
         )
         _LOGGER.info(
             "key_paths workspace_root=%s sqlite_path=%s",
@@ -86,13 +87,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "gateway":
-        workspace_root = Path(args.workspace_root)
-        sqlite_path = Path(args.db_path)
+        config = load_gateway_config(
+            workspace_root=Path(args.workspace_root) if args.workspace_root else None,
+            sqlite_path=Path(args.db_path) if args.db_path else None,
+        )
+        workspace_root = config.workspace_root
+        sqlite_path = config.sqlite_path
         app = GatewayApp(
-            config=GatewayConfig(
-                workspace_root=workspace_root,
-                sqlite_path=sqlite_path,
-            )
+            config=config
         )
         _LOGGER.info(
             "key_paths workspace_root=%s sqlite_path=%s",
@@ -109,13 +111,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "agent":
-        workspace_root = Path(args.workspace_root)
-        sqlite_path = Path(args.db_path)
-        selected_workspace = workspace_root / args.workspace
-        config = GatewayConfig(
-            workspace_root=workspace_root,
-            sqlite_path=sqlite_path,
+        config = load_gateway_config(
+            workspace_root=Path(args.workspace_root) if args.workspace_root else None,
+            sqlite_path=Path(args.db_path) if args.db_path else None,
         )
+        workspace_root = config.workspace_root
+        sqlite_path = config.sqlite_path
+        selected_workspace = workspace_root / args.workspace
         app = GatewayApp(
             config=config
         )

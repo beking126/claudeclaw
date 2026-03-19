@@ -129,3 +129,34 @@ def test_agent_command_supports_workspace_override(tmp_path: Path, capsys, monke
     assert exit_code == 0
     assert captured.out.strip() == "runtime-output"
     assert fake_runtime.workspace == workspace_root / "custom-room"
+
+
+def test_status_command_loads_local_config_json(tmp_path: Path, monkeypatch):
+    from claudebot_gateway.cli import main
+
+    config_dir = tmp_path / "claudebot"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.json").write_text(
+        '{"channels":{"telegram":{"enabled":true,"bot_token":"json-token"}}}',
+        encoding="utf-8",
+    )
+
+    class _FakeApp:
+        last_config = None
+
+        def __init__(self, *, config):
+            _FakeApp.last_config = config
+
+        def status(self):
+            return {
+                "runtime": {"running": False, "worker_count": 0, "unhandled_errors": 0},
+                "signals": {},
+            }
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("claudebot_gateway.cli.GatewayApp", _FakeApp)
+    exit_code = main(["status"])
+    assert exit_code == 0
+    assert _FakeApp.last_config is not None
+    assert _FakeApp.last_config.channels.telegram.enabled is True
+    assert _FakeApp.last_config.channels.telegram.bot_token == "json-token"
