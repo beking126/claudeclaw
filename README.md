@@ -84,35 +84,32 @@ uv run claudebot-gateway --verbose status
 The following items are planned to align fully with `docs/PRD_GATEWAY_DAEMON.md`.
 
 ### Channels and connectivity
-- Add additional production-ready adapters (Discord, Feishu, WhatsApp bridge, Slack bridge).
-- Improve Telegram from scaffold to fully robust integration.
-- Add reconnect/backoff policies and channel-level resilience metrics.
+- Harden remaining stub adapters (Discord, WhatsApp bridge, Slack bridge) into production-ready integrations.
+- Continue Telegram hardening for deeper reconnect lifecycle/failure-mode coverage.
+- Extend adapter health signals into richer unified channel resilience reporting.
 
 ### Agent integration
-- Replace placeholder/default turn handling with full Claude Agent SDK orchestration.
-- Integrate provider/tool loops, richer context composition, and stronger delivery semantics.
+- Claude Agent SDK runtime orchestration is implemented through adapter/factory boundaries.
+- Remaining work focuses on richer provider/tool-loop semantics and stronger delivery guarantees.
 
 ### Session management
-- Add session state persistence per-channel or per-workspace.
-- Extend session context to include channel-specific settings.
-- Can load SOUL.md/USER.md/TOOLS.md files from workspace root. These files are used as System Prompt and User Prompt respectively.
+- Read-only session persistence and resume-by-scope are implemented.
+- Workspace prompt-file loading/composition for `SOUL.md` / `USER.md` / `TOOLS.md` is implemented.
+- Remaining work is explicit policy controls for channel/session scope behavior.
 
 ### Scheduling
-- Extend cron model to support:
-  - one-shot `at`,
-  - interval `every`,
-  - cron expressions.
-- Add stronger retry/handling strategy for channel-down delivery cases.
+- `at` / `every` / cron-expression scheduling is implemented.
+- Delivery retry handling is implemented.
+- Remaining work is policy refinement for prolonged channel outages.
 
 ### Security and safety
-- Enforce sender allow-lists for inbound channels.
+- Sender allow-lists for inbound channels are implemented.
 - Add workspace restriction policy wiring for filesystem/exec surfaces.
 - Expand hardening for untrusted channel metadata and prompt-injection vectors.
 
 ### Observability and operations
-- Add richer health/liveness surfaces beyond CLI status snapshots.
+- CLI status snapshots and optional HTTP health/readiness serving are implemented.
 - Expand structured logs for reconnect attempts, cron outcomes, heartbeat outcomes, and latency/error signals.
-- Add optional HTTP health/readiness endpoint if adopted by runtime mode.
 
 ## Repository Structure
 

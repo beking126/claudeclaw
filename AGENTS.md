@@ -2,8 +2,10 @@
 
 ## 1) Source of Truth
 
-- Primary feature contract: `docs/PRD_GATEWAY_DAEMON.md`.
-- Current implementation constraints:
+- Planning/source-of-truth baseline:
+  - `docs/PRD_GATEWAY_DAEMON.md` (primary product requirements)
+  - `README.md` → `Future Implementation (Roadmap)` (current planned-delivery baseline)
+- Current implementation evidence scope:
   - `src/claudebot_gateway/**`
   - `tests/**`
   - `pyproject.toml`
