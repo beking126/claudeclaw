@@ -37,6 +37,8 @@ def test_config_defaults(tmp_path: Path):
     assert config.message_bus.inbound_maxsize == 1000
     assert config.agent_runtime.provider == "claude"
     assert config.agent_runtime.claude.tools == []
+    assert config.agent_runtime.claude.session_persistence_enabled is True
+    assert config.agent_runtime.claude.session_scope == "workspace_channel_destination"
 
 
 def test_load_gateway_config_from_local_json(tmp_path: Path):
@@ -71,6 +73,13 @@ def test_load_gateway_config_from_local_json(tmp_path: Path):
                         "max_backoff_seconds": 2.0,
                     }
                 },
+                "agent_runtime": {
+                    "provider": "claude",
+                    "claude": {
+                        "session_persistence_enabled": False,
+                        "session_scope": "workspace_channel_destination",
+                    },
+                },
             }
         ),
         encoding="utf-8",
@@ -90,3 +99,4 @@ def test_load_gateway_config_from_local_json(tmp_path: Path):
     assert config.channels.telegram.allowed_senders == ["alice"]
     assert config.channels.telegram.bot_token == "from-json-token"
     assert config.channels.telegram.send_max_attempts == 5
+    assert config.agent_runtime.claude.session_persistence_enabled is False

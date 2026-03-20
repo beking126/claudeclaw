@@ -112,3 +112,33 @@ def test_claude_adapter_supports_keyword_only_query_signature(tmp_path: Path):
 
     text = asyncio.run(run())
     assert text == "echo:hello"
+
+
+def test_claude_adapter_applies_request_resume_override(tmp_path: Path):
+    from claudebot_gateway.agent_runtime import AgentExecutionRequest, ClaudeSdkAdapter
+    from claudebot_gateway.config import ClaudeRuntimeOptions
+
+    captured: dict[str, Any] = {}
+
+    async def fake_query(prompt: str, options: Any):
+        captured["prompt"] = prompt
+        captured["options"] = options
+        yield {"type": "result", "result": "ok", "session_id": "s-2"}
+
+    async def run() -> Any:
+        adapter = ClaudeSdkAdapter(
+            options=ClaudeRuntimeOptions(resume="configured-resume", session_persistence_enabled=True),
+            query_callable=fake_query,
+        )
+        await adapter.execute(
+            AgentExecutionRequest(
+                prompt="hello",
+                workspace=tmp_path,
+                metadata={"resume_session_id": "persisted-resume"},
+            )
+        )
+        return captured["options"]
+
+    options = asyncio.run(run())
+    resume_value = options["resume"] if isinstance(options, dict) else getattr(options, "resume")
+    assert resume_value == "persisted-resume"

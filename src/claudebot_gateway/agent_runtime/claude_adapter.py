@@ -23,12 +23,14 @@ class ClaudeSdkAdapter:
 
     async def execute(self, request: AgentExecutionRequest) -> AgentExecutionResult:
         query_callable = self._query_callable or self._resolve_query_callable()
-        options = self._build_sdk_options(request.workspace)
+        resume_override = request.metadata.get("resume_session_id")
+        resolved_resume = str(resume_override) if isinstance(resume_override, str) and resume_override else None
+        options = self._build_sdk_options(request.workspace, resume_override=resolved_resume)
         _LOGGER.info(
             "agent_runtime_execute provider=claude workspace=%s continue_conversation=%s resume_set=%s",
             request.workspace.resolve(),
             self._options.continue_conversation,
-            bool(self._options.resume),
+            bool(resolved_resume or self._options.resume),
         )
         message_count = 0
         last_text = ""
@@ -69,10 +71,12 @@ class ClaudeSdkAdapter:
             raise AgentRuntimeExecutionError("claude-agent-sdk.query is not available.")
         return query_callable
 
-    def _build_sdk_options(self, workspace: Any) -> Any:
+    def _build_sdk_options(self, workspace: Any, *, resume_override: str | None = None) -> Any:
         options_payload = asdict(self._options)
         options_payload["cwd"] = workspace
         options_payload["agents"] = options_payload.pop("sub_agents")
+        if resume_override:
+            options_payload["resume"] = resume_override
         if not options_payload["tools"]:
             options_payload["tools"] = None
         if not options_payload["hooks"]:
@@ -81,6 +85,8 @@ class ClaudeSdkAdapter:
             options_payload["mcp_servers"] = {}
         # Remove `skills` from options_payload as it's not supported by claude-agent-sdk
         options_payload.pop("skills", None)
+        options_payload.pop("session_persistence_enabled", None)
+        options_payload.pop("session_scope", None)
         try:
             sdk_module = import_module("claude_agent_sdk")
         except ImportError:

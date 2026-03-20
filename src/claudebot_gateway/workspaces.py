@@ -4,6 +4,7 @@ from pathlib import Path
 
 _INVALID_CHAR_PATTERN = re.compile(r"[^a-z0-9_-]+")
 _UNDERSCORE_PATTERN = re.compile(r"_+")
+_PROMPT_FILES = ("SOUL.md", "USER.md", "TOOLS.md")
 
 
 def sanitize_workspace_token(value: str) -> str:
@@ -21,6 +22,33 @@ def make_channel_workspace_key(channel_name: str, channel_id: str) -> str:
 
 def make_cron_workspace_key(job_id: str) -> str:
     return f"cron_{sanitize_workspace_token(job_id)}"
+
+
+def load_workspace_prompt_files(workspace: Path) -> dict[str, str]:
+    workspace_path = Path(workspace)
+    loaded: dict[str, str] = {}
+    for filename in _PROMPT_FILES:
+        file_path = workspace_path / filename
+        if not file_path.exists():
+            loaded[filename] = ""
+            continue
+        try:
+            loaded[filename] = file_path.read_text(encoding="utf-8")
+        except Exception:
+            loaded[filename] = ""
+    return loaded
+
+
+def compose_workspace_prompt(prompt: str, prompt_files: dict[str, str]) -> str:
+    blocks: list[str] = []
+    for filename in _PROMPT_FILES:
+        content = prompt_files.get(filename, "").strip()
+        if not content:
+            continue
+        title = filename.removesuffix(".md")
+        blocks.append(f"[{title}]\n{content}")
+    blocks.append(prompt)
+    return "\n\n".join(blocks)
 
 
 class WorkspaceResolver:

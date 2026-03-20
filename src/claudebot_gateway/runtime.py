@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from collections.abc import Coroutine
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
@@ -19,6 +20,8 @@ from claudebot_gateway.health import HealthService
 from claudebot_gateway.heartbeat_service import HeartbeatService
 from claudebot_gateway.message_bus import MessageBus
 from claudebot_gateway.outbound_dispatcher import OutboundDispatcher
+from claudebot_gateway.persistence.sqlite_store import SqliteStore
+from claudebot_gateway.workspaces import compose_workspace_prompt, load_workspace_prompt_files
 from claudebot_gateway.workspaces import WorkspaceResolver
 
 
@@ -95,10 +98,80 @@ class GatewayRuntime:
             self._unhandled_errors += 1
 
 
+class SessionContextRuntime:
+    def __init__(
+        self,
+        *,
+        runtime: Any,
+        store: SqliteStore,
+        session_persistence_enabled: bool,
+    ):
+        self._runtime = runtime
+        self._store = store
+        self._session_persistence_enabled = session_persistence_enabled
+
+    async def execute(self, request: AgentExecutionRequest) -> Any:
+        request_metadata = deepcopy(request.metadata) if isinstance(request.metadata, dict) else {}
+        workspace_path = str(request.workspace)
+        channel = request.channel
+        destination = request.destination
+        prompt_files = load_workspace_prompt_files(request.workspace)
+        request_metadata["workspace_prompt_files_loaded"] = [name for name, content in prompt_files.items() if content.strip()]
+        composed_prompt = compose_workspace_prompt(request.prompt, prompt_files)
+        if self._session_persistence_enabled and "resume_session_id" not in request_metadata:
+            latest_session = self._store.get_latest_agent_session(
+                provider="claude",
+                workspace_path=workspace_path,
+                channel=channel,
+                destination=destination,
+            )
+            if latest_session is not None:
+                latest_session_id = latest_session.get("session_id")
+                if isinstance(latest_session_id, str) and latest_session_id:
+                    request_metadata["resume_session_id"] = latest_session_id
+        resolved_request = AgentExecutionRequest(
+            prompt=composed_prompt,
+            workspace=request.workspace,
+            channel=channel,
+            destination=destination,
+            metadata=request_metadata,
+        )
+        result = await self._runtime.execute(resolved_request)
+        if not self._session_persistence_enabled:
+            return result
+        result_metadata = result.metadata if isinstance(result.metadata, dict) else {}
+        session_id_raw = result_metadata.get("session_id")
+        session_id = str(session_id_raw) if isinstance(session_id_raw, str | int) else None
+        try:
+            self._store.record_agent_turn(
+                provider=result.provider,
+                session_id=session_id,
+                workspace_path=workspace_path,
+                channel=channel,
+                destination=destination,
+                prompt_text=request.prompt,
+                response_text=result.text,
+                metadata=result_metadata,
+            )
+            if session_id:
+                self._store.upsert_latest_agent_session(
+                    provider=result.provider,
+                    workspace_path=workspace_path,
+                    channel=channel,
+                    destination=destination,
+                    session_id=session_id,
+                )
+        except Exception:
+            _LOGGER.exception("session_persistence_failed")
+        return result
+
+
 class GatewayApp:
     def __init__(self, *, config: GatewayConfig):
         self._config = config
         self._agent_runtime = create_agent_runtime(config)
+        self._store = SqliteStore(db_path=config.sqlite_path)
+        self._session_runtime = self._runtime_with_session_context(self._agent_runtime)
         self._workspace_resolver = WorkspaceResolver(config.workspace_root)
         self._workspace_resolver.main().mkdir(parents=True, exist_ok=True)
         _LOGGER.info(
@@ -155,7 +228,7 @@ class GatewayApp:
             channels["slack"] = slack
         self._channel_manager = ChannelManager(channels=channels)
         self._agent_runner = AgentRunner(
-            runtime=self._agent_runtime,
+            runtime=self._session_runtime,
             default_workspace=self._workspace_resolver.main(),
             channel_allowed_senders=self._channel_allowed_senders(config),
         )
@@ -306,7 +379,8 @@ class GatewayApp:
         destination: str,
         metadata: dict[str, str],
     ) -> str:
-        result = await self._agent_runtime.execute(
+        runtime = self._runtime_with_session_context(self._agent_runtime)
+        result = await runtime.execute(
             AgentExecutionRequest(
                 prompt=prompt,
                 workspace=workspace,
@@ -320,7 +394,8 @@ class GatewayApp:
     async def execute_prompt(self, *, prompt: str, workspace: Path | None = None) -> str:
         selected_workspace = workspace or self._workspace_resolver.main()
         selected_workspace.mkdir(parents=True, exist_ok=True)
-        result = await self._agent_runtime.execute(
+        runtime = self._runtime_with_session_context(self._agent_runtime)
+        result = await runtime.execute(
             AgentExecutionRequest(
                 prompt=prompt,
                 workspace=selected_workspace,
@@ -329,3 +404,10 @@ class GatewayApp:
             )
         )
         return result.text
+
+    def _runtime_with_session_context(self, runtime: Any) -> SessionContextRuntime:
+        return SessionContextRuntime(
+            runtime=runtime,
+            store=self._store,
+            session_persistence_enabled=self._config.agent_runtime.claude.session_persistence_enabled,
+        )

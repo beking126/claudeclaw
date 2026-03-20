@@ -228,3 +228,61 @@ def test_gateway_app_wires_health_http_host_and_port(tmp_path: Path):
     assert app._health._http_enabled is True
     assert app._health._host == "127.0.0.1"
     assert app._health._port == 0
+
+
+def test_gateway_app_persists_turns_and_uses_persisted_resume(tmp_path: Path):
+    from claudebot_gateway.agent_runtime import AgentExecutionResult
+    from claudebot_gateway.config import GatewayConfig
+    from claudebot_gateway.persistence.sqlite_store import SqliteStore
+    from claudebot_gateway.runtime import GatewayApp
+
+    class _TrackingRuntime:
+        def __init__(self):
+            self.requests: list[AgentExecutionRequest] = []
+            self._count = 0
+
+        async def execute(self, request):
+            self.requests.append(request)
+            self._count += 1
+            return AgentExecutionResult(
+                text=f"ok-{self._count}",
+                provider="claude",
+                metadata={"session_id": f"s-{self._count}", "usage": {"input_tokens": self._count}},
+            )
+
+    async def _run() -> tuple[str | None, str, str]:
+        workspace_root = tmp_path / "workspaces"
+        main_workspace = workspace_root / "main"
+        main_workspace.mkdir(parents=True, exist_ok=True)
+        (main_workspace / "SOUL.md").write_text("soul context", encoding="utf-8")
+        app = GatewayApp(
+            config=GatewayConfig(
+                workspace_root=workspace_root,
+                sqlite_path=tmp_path / "state" / "gateway.db",
+            )
+        )
+        tracking = _TrackingRuntime()
+        app._agent_runner._runtime = app._runtime_with_session_context(tracking)
+        await app._bus.publish_inbound({"channel": "telegram", "destination": "chat:99", "text": "hello"})
+        await app._agent_runner.process_once(app._bus)
+        await app._bus.publish_inbound({"channel": "telegram", "destination": "chat:99", "text": "again"})
+        await app._agent_runner.process_once(app._bus)
+        first_prompt = tracking.requests[0].prompt
+        second_resume = tracking.requests[1].metadata.get("resume_session_id")
+        second_prompt = tracking.requests[1].prompt
+        return second_resume if isinstance(second_resume, str) else None, first_prompt, second_prompt
+
+    resumed_session_id, first_prompt, second_prompt = asyncio.run(_run())
+    assert resumed_session_id == "s-1"
+    assert "SOUL" in first_prompt
+    assert first_prompt.endswith("hello")
+    assert second_prompt.endswith("again")
+    store = SqliteStore(db_path=tmp_path / "state" / "gateway.db")
+    latest = store.get_latest_agent_session(
+        provider="claude",
+        workspace_path=str(tmp_path / "workspaces" / "main"),
+        channel="telegram",
+        destination="chat:99",
+    )
+    assert latest is not None
+    assert latest["session_id"] == "s-2"

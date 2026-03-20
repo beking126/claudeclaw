@@ -91,6 +91,54 @@ class SqliteStore:
             )
             """
         )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_sessions (
+                session_row_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                workspace_path TEXT NOT NULL,
+                channel TEXT,
+                destination TEXT,
+                session_id TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(provider, workspace_path, channel, destination)
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS agent_sessions_updated_at
+            AFTER UPDATE ON agent_sessions
+            BEGIN
+                UPDATE agent_sessions
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE session_row_id = NEW.session_row_id;
+            END
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_turns (
+                turn_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL,
+                session_id TEXT,
+                workspace_path TEXT NOT NULL,
+                channel TEXT,
+                destination TEXT,
+                prompt_text TEXT NOT NULL,
+                response_text TEXT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_turns_session_id
+            ON agent_turns(session_id)
+            """
+        )
         self._conn.commit()
 
     def _ensure_cron_jobs_columns(self) -> None:
@@ -311,3 +359,107 @@ class SqliteStore:
             "error": row["error"],
             "workspace_key": row["workspace_key"],
         }
+
+    def upsert_latest_agent_session(
+        self,
+        *,
+        provider: str,
+        workspace_path: str,
+        channel: str | None,
+        destination: str | None,
+        session_id: str,
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO agent_sessions (provider, workspace_path, channel, destination, session_id)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(provider, workspace_path, channel, destination) DO UPDATE SET
+                session_id = excluded.session_id
+            """,
+            (provider, workspace_path, channel, destination, session_id),
+        )
+        self._conn.commit()
+
+    def get_latest_agent_session(
+        self,
+        *,
+        provider: str,
+        workspace_path: str,
+        channel: str | None,
+        destination: str | None,
+    ) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            """
+            SELECT provider, workspace_path, channel, destination, session_id, created_at, updated_at
+            FROM agent_sessions
+            WHERE provider = ? AND workspace_path = ? AND channel IS ? AND destination IS ?
+            """,
+            (provider, workspace_path, channel, destination),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "provider": row["provider"],
+            "workspace_path": row["workspace_path"],
+            "channel": row["channel"],
+            "destination": row["destination"],
+            "session_id": row["session_id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def record_agent_turn(
+        self,
+        *,
+        provider: str,
+        session_id: str | None,
+        workspace_path: str,
+        channel: str | None,
+        destination: str | None,
+        prompt_text: str,
+        response_text: str,
+        metadata: dict[str, Any] | None,
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO agent_turns (
+                provider, session_id, workspace_path, channel, destination, prompt_text, response_text, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                provider,
+                session_id,
+                workspace_path,
+                channel,
+                destination,
+                prompt_text,
+                response_text,
+                json.dumps(metadata or {}, sort_keys=True),
+            ),
+        )
+        self._conn.commit()
+
+    def list_agent_turns(self, *, session_id: str) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """
+            SELECT provider, session_id, workspace_path, channel, destination, prompt_text, response_text, metadata_json, created_at
+            FROM agent_turns
+            WHERE session_id = ?
+            ORDER BY turn_id ASC
+            """,
+            (session_id,),
+        ).fetchall()
+        return [
+            {
+                "provider": row["provider"],
+                "session_id": row["session_id"],
+                "workspace_path": row["workspace_path"],
+                "channel": row["channel"],
+                "destination": row["destination"],
+                "prompt_text": row["prompt_text"],
+                "response_text": row["response_text"],
+                "metadata": json.loads(row["metadata_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]

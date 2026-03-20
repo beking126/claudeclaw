@@ -23,6 +23,8 @@ class ClaudeRuntimeOptions:
     env: dict[str, str] = field(default_factory=dict)
     extra_args: dict[str, str | None] = field(default_factory=dict)
     permission_mode: str | None = None
+    session_persistence_enabled: bool = True
+    session_scope: str = "workspace_channel_destination"
 
 
 @dataclass(slots=True)
@@ -150,6 +152,19 @@ def load_gateway_config(
             max_backoff = telegram_raw.get("max_backoff_seconds")
             if isinstance(max_backoff, int | float):
                 config.channels.telegram.max_backoff_seconds = float(max_backoff)
+    agent_runtime_raw = raw.get("agent_runtime")
+    if isinstance(agent_runtime_raw, dict):
+        provider_raw = agent_runtime_raw.get("provider")
+        if isinstance(provider_raw, str) and provider_raw:
+            config.agent_runtime.provider = provider_raw
+        claude_raw = agent_runtime_raw.get("claude")
+        if isinstance(claude_raw, dict):
+            session_persistence_enabled = claude_raw.get("session_persistence_enabled")
+            if isinstance(session_persistence_enabled, bool):
+                config.agent_runtime.claude.session_persistence_enabled = session_persistence_enabled
+            session_scope = claude_raw.get("session_scope")
+            if isinstance(session_scope, str) and session_scope:
+                config.agent_runtime.claude.session_scope = session_scope
     return config
 
 
