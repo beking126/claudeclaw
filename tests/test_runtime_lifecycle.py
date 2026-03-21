@@ -245,6 +245,33 @@ def test_gateway_app_builders_preserve_enabled_channels_and_allowed_senders(tmp_
     }
 
 
+def test_gateway_app_build_services_returns_expected_components(tmp_path: Path):
+    from claudebot_gateway.agent_runner import AgentRunner
+    from claudebot_gateway.config import GatewayConfig
+    from claudebot_gateway.cron_service import CronService
+    from claudebot_gateway.health import HealthService
+    from claudebot_gateway.heartbeat_service import HeartbeatService
+    from claudebot_gateway.outbound_dispatcher import OutboundDispatcher
+    from claudebot_gateway.runtime import GatewayApp, GatewayRuntime
+
+    app = GatewayApp(
+        config=GatewayConfig(
+            workspace_root=tmp_path / "workspaces",
+            sqlite_path=tmp_path / "state" / "gateway.db",
+        )
+    )
+    components = app._build_services(config=app._config, channel_allowed_senders={})
+    agent_runner, dispatcher, cron, heartbeat, runtime, health = components
+    assert isinstance(agent_runner, AgentRunner)
+    assert isinstance(dispatcher, OutboundDispatcher)
+    assert isinstance(cron, CronService)
+    assert isinstance(heartbeat, HeartbeatService)
+    assert isinstance(runtime, GatewayRuntime)
+    assert isinstance(health, HealthService)
+    snapshot = runtime.health_snapshot()
+    assert snapshot["worker_count"] == 4
+
+
 def test_gateway_app_wires_health_http_host_and_port(tmp_path: Path):
     from claudebot_gateway.config import GatewayConfig, HealthHttpConfig
     from claudebot_gateway.runtime import GatewayApp

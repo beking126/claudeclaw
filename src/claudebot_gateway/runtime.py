@@ -188,29 +188,16 @@ class GatewayApp:
         self._adapters, channels = self._build_channels(config=config, bus=self._bus)
         self._channel_manager = ChannelManager(channels=channels)
         channel_allowed_senders = self._build_allowed_senders(config)
-        self._agent_runner = AgentRunner(
-            runtime=self._session_runtime,
-            default_workspace=self._workspace_resolver.main(),
+        (
+            self._agent_runner,
+            self._dispatcher,
+            self._cron,
+            self._heartbeat,
+            self._runtime,
+            self._health,
+        ) = self._build_services(
+            config=config,
             channel_allowed_senders=channel_allowed_senders,
-        )
-        self._dispatcher = OutboundDispatcher(adapters=self._adapters)
-        self._cron = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
-        self._heartbeat = HeartbeatService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
-        self._runtime = GatewayRuntime(
-            workers=[
-                self._agent_worker,
-                self._dispatch_worker,
-                self._cron_worker,
-                self._heartbeat_worker,
-            ],
-            on_stopping_hooks=[self._bus.close_inbound_intake],
-        )
-        self._health = HealthService(
-            runtime=self._runtime,
-            http_enabled=config.health_http.enabled,
-            host=config.health_http.host,
-            port=config.health_http.port,
-            signal_provider=self._health_signals,
         )
 
     @staticmethod
@@ -274,6 +261,38 @@ class GatewayApp:
             if allowed:
                 channel_senders[channel_name] = allowed
         return channel_senders
+
+    def _build_services(
+        self,
+        *,
+        config: GatewayConfig,
+        channel_allowed_senders: dict[str, set[str]],
+    ) -> tuple[AgentRunner, OutboundDispatcher, CronService, HeartbeatService, GatewayRuntime, HealthService]:
+        agent_runner = AgentRunner(
+            runtime=self._session_runtime,
+            default_workspace=self._workspace_resolver.main(),
+            channel_allowed_senders=channel_allowed_senders,
+        )
+        dispatcher = OutboundDispatcher(adapters=self._adapters)
+        cron = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
+        heartbeat = HeartbeatService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
+        runtime = GatewayRuntime(
+            workers=[
+                self._agent_worker,
+                self._dispatch_worker,
+                self._cron_worker,
+                self._heartbeat_worker,
+            ],
+            on_stopping_hooks=[self._bus.close_inbound_intake],
+        )
+        health = HealthService(
+            runtime=runtime,
+            http_enabled=config.health_http.enabled,
+            host=config.health_http.host,
+            port=config.health_http.port,
+            signal_provider=self._health_signals,
+        )
+        return agent_runner, dispatcher, cron, heartbeat, runtime, health
 
     def _channel_allowed_senders(self, config: GatewayConfig) -> dict[str, set[str]]:
         return self._build_allowed_senders(config)
