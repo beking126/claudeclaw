@@ -59,18 +59,9 @@ def test_gateway_app_run_once_reads_heartbeat_file(tmp_path: Path):
     assert run["actionable"] == 1
 
 
-def test_gateway_runtime_stop_closes_inbound_intake(tmp_path: Path):
-    from claudebot_gateway.config import GatewayConfig
-    from claudebot_gateway.runtime import GatewayApp
-
+def test_gateway_runtime_stop_closes_inbound_intake(tmp_path: Path, gateway_app_factory):
     async def _run() -> bool:
-        app = GatewayApp(
-            config=GatewayConfig(
-                workspace_root=tmp_path / "workspaces",
-                sqlite_path=tmp_path / "state" / "gateway.db",
-                heartbeat_interval_seconds=1,
-            )
-        )
+        app = gateway_app_factory(tmp_path)
         await app._runtime.start()
         await app._runtime.stop()
         accepted = await app._bus.try_publish_inbound({"channel": "cli", "destination": "d", "text": "x"})

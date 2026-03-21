@@ -2,23 +2,7 @@ import asyncio
 from pathlib import Path
 from typing import cast
 
-from claudebot_gateway.agent_runtime import AgentExecutionResult
-
-
-class _CollectingAdapter:
-    def __init__(self):
-        self.sent: list[dict[str, str]] = []
-
-    async def send(self, message: dict[str, str]) -> None:
-        self.sent.append(message)
-
-
-class _FakeRuntime:
-    async def execute(self, request):
-        return AgentExecutionResult(text=f"reply:{request.prompt}", provider="test")
-
-
-def test_gateway_e2e_cli_message_cron_heartbeat_flow(tmp_path: Path):
+def test_gateway_e2e_cli_message_cron_heartbeat_flow(tmp_path: Path, collecting_adapter, echo_runtime):
     from claudebot_gateway.agent_runner import AgentRunner
     from claudebot_gateway.cron_service import CronService
     from claudebot_gateway.heartbeat_service import HeartbeatService
@@ -26,10 +10,9 @@ def test_gateway_e2e_cli_message_cron_heartbeat_flow(tmp_path: Path):
     from claudebot_gateway.outbound_dispatcher import OutboundDispatcher
 
     async def _run() -> dict[str, object]:
-        adapter = _CollectingAdapter()
         bus = MessageBus(inbound_maxsize=1)
-        runner = AgentRunner(runtime=_FakeRuntime(), default_workspace=tmp_path / "workspaces" / "main")
-        dispatcher = OutboundDispatcher(adapters={"telegram": adapter})
+        runner = AgentRunner(runtime=echo_runtime, default_workspace=tmp_path / "workspaces" / "main")
+        dispatcher = OutboundDispatcher(adapters={"telegram": collecting_adapter})
         await bus.publish_inbound({"channel": "telegram", "destination": "chat:1", "text": "hello"})
         accepted = await bus.try_publish_inbound({"channel": "telegram", "destination": "chat:1", "text": "overflow"})
         rejection = bus.make_busy_rejection("cli", "chat:1")
@@ -41,7 +24,7 @@ def test_gateway_e2e_cli_message_cron_heartbeat_flow(tmp_path: Path):
             job_id="job-01",
             prompt="daily",
             target={"channel": "telegram", "destination": "chat:1"},
-            send_func=adapter.send,
+            send_func=collecting_adapter.send,
             agent_func=lambda _prompt, _ws: asyncio.sleep(0, result="cron-report"),
         )
         await cron.schedule_job(
@@ -53,7 +36,7 @@ def test_gateway_e2e_cli_message_cron_heartbeat_flow(tmp_path: Path):
         )
         due_count = await cron.run_due_jobs(
             now_epoch_seconds=1.0,
-            send_func=adapter.send,
+            send_func=collecting_adapter.send,
             agent_func=lambda _prompt, _ws: asyncio.sleep(0, result="cron-due-report"),
         )
 
@@ -65,7 +48,7 @@ def test_gateway_e2e_cli_message_cron_heartbeat_flow(tmp_path: Path):
         return {
             "accepted": accepted,
             "rejection": rejection,
-            "delivered": adapter.sent,
+            "delivered": collecting_adapter.sent,
             "heartbeat_last": heartbeat.get_last_run(),
             "cron_last": cron.get_last_delivery("job-01"),
             "cron_due_count": due_count,

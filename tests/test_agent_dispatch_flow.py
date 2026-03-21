@@ -1,51 +1,21 @@
 import asyncio
 from pathlib import Path
 
-from claudebot_gateway.agent_runtime import AgentExecutionResult
 from claudebot_gateway.message_bus import MessageBus
 
 
-class _FakeAdapter:
-    def __init__(self):
-        self.sent: list[dict[str, str]] = []
-
-    async def send(self, message: dict[str, str]) -> None:
-        self.sent.append(message)
-
-
-class _FakeRuntime:
-    async def execute(self, request):
-        return AgentExecutionResult(text=f"echo:{request.prompt}", provider="test")
-
-
-class _FailingRuntime:
-    async def execute(self, request):
-        _ = request
-        raise RuntimeError("boom")
-
-
-class _TrackingRuntime:
-    def __init__(self):
-        self.requests = []
-
-    async def execute(self, request):
-        self.requests.append(request)
-        return AgentExecutionResult(text=f"ok:{request.prompt}", provider="test")
-
-
-def test_inbound_generates_outbound_with_target_channel():
+def test_inbound_generates_outbound_with_target_channel(collecting_adapter, echo_runtime):
     from claudebot_gateway.agent_runner import AgentRunner
     from claudebot_gateway.outbound_dispatcher import OutboundDispatcher
 
     async def _run() -> list[dict[str, str]]:
         bus = MessageBus()
-        adapter = _FakeAdapter()
-        runner = AgentRunner(runtime=_FakeRuntime(), default_workspace=Path("workspaces/main"))
-        dispatcher = OutboundDispatcher(adapters={"telegram": adapter})
+        runner = AgentRunner(runtime=echo_runtime, default_workspace=Path("workspaces/main"))
+        dispatcher = OutboundDispatcher(adapters={"telegram": collecting_adapter})
         await bus.publish_inbound({"channel": "telegram", "destination": "chat:1", "text": "hi"})
         await runner.process_once(bus)
         await dispatcher.dispatch_once(bus)
-        return adapter.sent
+        return collecting_adapter.sent
 
     sent = asyncio.run(_run())
     assert sent[0]["channel"] == "telegram"
@@ -53,12 +23,12 @@ def test_inbound_generates_outbound_with_target_channel():
     assert sent[0]["text"] == "echo:hi"
 
 
-def test_runtime_failure_still_emits_routed_outbound_message():
+def test_runtime_failure_still_emits_routed_outbound_message(failing_runtime):
     from claudebot_gateway.agent_runner import AgentRunner
 
     async def _run() -> dict[str, str]:
         bus = MessageBus()
-        runner = AgentRunner(runtime=_FailingRuntime(), default_workspace=Path("workspaces/main"))
+        runner = AgentRunner(runtime=failing_runtime, default_workspace=Path("workspaces/main"))
         await bus.publish_inbound({"channel": "telegram", "destination": "chat:9", "text": "hi"})
         return await runner.process_once(bus)
 
@@ -68,14 +38,13 @@ def test_runtime_failure_still_emits_routed_outbound_message():
     assert outbound["text"] == "Agent execution failed. Try again shortly."
 
 
-def test_sender_not_in_allow_list_is_rejected_without_runtime_call():
+def test_sender_not_in_allow_list_is_rejected_without_runtime_call(tracking_runtime):
     from claudebot_gateway.agent_runner import AgentRunner
 
     async def _run() -> tuple[dict[str, str], int]:
         bus = MessageBus()
-        runtime = _TrackingRuntime()
         runner = AgentRunner(
-            runtime=runtime,
+            runtime=tracking_runtime,
             default_workspace=Path("workspaces/main"),
             channel_allowed_senders={"telegram": {"trusted-user"}},
         )
@@ -88,20 +57,19 @@ def test_sender_not_in_allow_list_is_rejected_without_runtime_call():
             }
         )
         outbound = await runner.process_once(bus)
-        return outbound, len(runtime.requests)
+        return outbound, len(tracking_runtime.requests)
 
     outbound, request_count = asyncio.run(_run())
     assert request_count == 0
     assert outbound["text"] == "Sender is not allowed for this channel."
 
 
-def test_runtime_metadata_is_sanitized_before_execution():
+def test_runtime_metadata_is_sanitized_before_execution(tracking_runtime):
     from claudebot_gateway.agent_runner import AgentRunner
 
     async def _run() -> dict[str, object]:
         bus = MessageBus()
-        runtime = _TrackingRuntime()
-        runner = AgentRunner(runtime=runtime, default_workspace=Path("workspaces/main"))
+        runner = AgentRunner(runtime=tracking_runtime, default_workspace=Path("workspaces/main"))
         await bus.publish_inbound(
             {
                 "channel": "telegram",
@@ -116,7 +84,7 @@ def test_runtime_metadata_is_sanitized_before_execution():
             }
         )
         await runner.process_once(bus)
-        metadata = runtime.requests[0].metadata or {}
+        metadata = tracking_runtime.requests[0].metadata or {}
         return metadata
 
     metadata = asyncio.run(_run())
