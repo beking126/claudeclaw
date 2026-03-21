@@ -149,6 +149,59 @@ class SqliteStore:
         if "schedule_value" not in existing:
             self._conn.execute("ALTER TABLE cron_jobs ADD COLUMN schedule_value TEXT NOT NULL DEFAULT ''")
 
+    def _row_to_delivery(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "job_id": row["job_id"],
+            "channel": row["channel"],
+            "destination": row["destination"],
+            "status": row["status"],
+            "failure_reason": row["failure_reason"],
+        }
+
+    def _row_to_cron_job(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "job_id": row["job_id"],
+            "prompt": row["prompt"],
+            "channel": row["channel"],
+            "destination": row["destination"],
+            "interval_seconds": row["interval_seconds"],
+            "schedule_kind": row["schedule_kind"],
+            "schedule_value": row["schedule_value"],
+            "next_run_epoch_seconds": row["next_run_epoch_seconds"],
+        }
+
+    def _row_to_heartbeat_run(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "actionable": row["actionable"],
+            "status": row["status"],
+            "error": row["error"],
+            "workspace_key": row["workspace_key"],
+        }
+
+    def _row_to_agent_session(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "provider": row["provider"],
+            "workspace_path": row["workspace_path"],
+            "channel": row["channel"],
+            "destination": row["destination"],
+            "session_id": row["session_id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def _row_to_agent_turn(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "provider": row["provider"],
+            "session_id": row["session_id"],
+            "workspace_path": row["workspace_path"],
+            "channel": row["channel"],
+            "destination": row["destination"],
+            "prompt_text": row["prompt_text"],
+            "response_text": row["response_text"],
+            "metadata": json.loads(row["metadata_json"]),
+            "created_at": row["created_at"],
+        }
+
     def upsert_channel_identity(
         self,
         *,
@@ -247,13 +300,7 @@ class SqliteStore:
         ).fetchone()
         if row is None:
             return None
-        return {
-            "job_id": row["job_id"],
-            "channel": row["channel"],
-            "destination": row["destination"],
-            "status": row["status"],
-            "failure_reason": row["failure_reason"],
-        }
+        return self._row_to_delivery(row)
 
     def upsert_cron_job(
         self,
@@ -296,19 +343,7 @@ class SqliteStore:
             """,
             (now_epoch_seconds,),
         ).fetchall()
-        return [
-            {
-                "job_id": row["job_id"],
-                "prompt": row["prompt"],
-                "channel": row["channel"],
-                "destination": row["destination"],
-                "interval_seconds": row["interval_seconds"],
-                "schedule_kind": row["schedule_kind"],
-                "schedule_value": row["schedule_value"],
-                "next_run_epoch_seconds": row["next_run_epoch_seconds"],
-            }
-            for row in rows
-        ]
+        return [self._row_to_cron_job(row) for row in rows]
 
     def update_cron_job_next_run(self, *, job_id: str, next_run_epoch_seconds: float) -> None:
         self._conn.execute(
@@ -353,12 +388,7 @@ class SqliteStore:
         ).fetchone()
         if row is None:
             return None
-        return {
-            "actionable": row["actionable"],
-            "status": row["status"],
-            "error": row["error"],
-            "workspace_key": row["workspace_key"],
-        }
+        return self._row_to_heartbeat_run(row)
 
     def upsert_latest_agent_session(
         self,
@@ -398,15 +428,7 @@ class SqliteStore:
         ).fetchone()
         if row is None:
             return None
-        return {
-            "provider": row["provider"],
-            "workspace_path": row["workspace_path"],
-            "channel": row["channel"],
-            "destination": row["destination"],
-            "session_id": row["session_id"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
+        return self._row_to_agent_session(row)
 
     def record_agent_turn(
         self,
@@ -449,17 +471,4 @@ class SqliteStore:
             """,
             (session_id,),
         ).fetchall()
-        return [
-            {
-                "provider": row["provider"],
-                "session_id": row["session_id"],
-                "workspace_path": row["workspace_path"],
-                "channel": row["channel"],
-                "destination": row["destination"],
-                "prompt_text": row["prompt_text"],
-                "response_text": row["response_text"],
-                "metadata": json.loads(row["metadata_json"]),
-                "created_at": row["created_at"],
-            }
-            for row in rows
-        ]
+        return [self._row_to_agent_turn(row) for row in rows]
