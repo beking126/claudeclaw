@@ -6,13 +6,14 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from claudebot_gateway.channels.base import BaseChannel
 from claudebot_gateway.message_bus import MessageBus
 
 
 _LOGGER = logging.getLogger("claudebot_gateway.channels.telegram")
 
 
-class TelegramChannel:
+class TelegramChannel(BaseChannel):
     def __init__(
         self,
         *,
@@ -23,6 +24,7 @@ class TelegramChannel:
         send_max_attempts: int = 3,
         sdk_loader: Callable[[], dict[str, Any]] | None = None,
     ):
+        super().__init__()
         self._bus = bus
         self._token = token or os.getenv("CLAUDEBOT_TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
         self._base_backoff_seconds = max(0.0, base_backoff_seconds)

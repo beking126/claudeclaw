@@ -6,13 +6,14 @@ import threading
 from collections import OrderedDict
 from typing import Any
 
+from claudebot_gateway.channels.base import BaseChannel
 from claudebot_gateway.message_bus import MessageBus
 
 
 _LOGGER = logging.getLogger("claudebot_gateway.channels.feishu")
 
 
-class FeishuChannel:
+class FeishuChannel(BaseChannel):
     def __init__(
         self,
         *,
@@ -26,6 +27,7 @@ class FeishuChannel:
         max_backoff_seconds: float = 8.0,
         sdk_loader: Any = None,
     ):
+        super().__init__()
         self._bus = bus
         self._app_id = app_id
         self._app_secret = app_secret

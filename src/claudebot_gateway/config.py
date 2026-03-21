@@ -115,43 +115,10 @@ def load_gateway_config(
         _apply_channel_toggle(config.channels.slack, channels_raw.get("slack"))
         feishu_raw = channels_raw.get("feishu")
         if isinstance(feishu_raw, dict):
-            _apply_channel_toggle(config.channels.feishu, feishu_raw)
-            app_id = feishu_raw.get("app_id")
-            if isinstance(app_id, str):
-                config.channels.feishu.app_id = app_id
-            app_secret = feishu_raw.get("app_secret")
-            if isinstance(app_secret, str):
-                config.channels.feishu.app_secret = app_secret
-            verify_token = feishu_raw.get("verify_token")
-            if isinstance(verify_token, str):
-                config.channels.feishu.verify_token = verify_token
-            encrypt_key = feishu_raw.get("encrypt_key")
-            if isinstance(encrypt_key, str):
-                config.channels.feishu.encrypt_key = encrypt_key
-            send_max_attempts = feishu_raw.get("send_max_attempts")
-            if isinstance(send_max_attempts, int):
-                config.channels.feishu.send_max_attempts = send_max_attempts
-            base_backoff = feishu_raw.get("base_backoff_seconds")
-            if isinstance(base_backoff, int | float):
-                config.channels.feishu.base_backoff_seconds = float(base_backoff)
-            max_backoff = feishu_raw.get("max_backoff_seconds")
-            if isinstance(max_backoff, int | float):
-                config.channels.feishu.max_backoff_seconds = float(max_backoff)
+            _apply_feishu_config(config.channels.feishu, feishu_raw)
         telegram_raw = channels_raw.get("telegram")
         if isinstance(telegram_raw, dict):
-            _apply_channel_toggle(config.channels.telegram, telegram_raw)
-            token = telegram_raw.get("bot_token")
-            if isinstance(token, str):
-                config.channels.telegram.bot_token = token
-            send_max_attempts = telegram_raw.get("send_max_attempts")
-            if isinstance(send_max_attempts, int):
-                config.channels.telegram.send_max_attempts = send_max_attempts
-            base_backoff = telegram_raw.get("base_backoff_seconds")
-            if isinstance(base_backoff, int | float):
-                config.channels.telegram.base_backoff_seconds = float(base_backoff)
-            max_backoff = telegram_raw.get("max_backoff_seconds")
-            if isinstance(max_backoff, int | float):
-                config.channels.telegram.max_backoff_seconds = float(max_backoff)
+            _apply_telegram_config(config.channels.telegram, telegram_raw)
     agent_runtime_raw = raw.get("agent_runtime")
     if isinstance(agent_runtime_raw, dict):
         provider_raw = agent_runtime_raw.get("provider")
@@ -177,3 +144,61 @@ def _apply_channel_toggle(toggle: ChannelToggle, raw: object) -> None:
     allowed_senders = raw.get("allowed_senders")
     if isinstance(allowed_senders, list):
         toggle.allowed_senders = [sender for sender in allowed_senders if isinstance(sender, str)]
+
+
+def _read_str(raw: dict[str, Any], key: str) -> str | None:
+    value = raw.get(key)
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def _read_int(raw: dict[str, Any], key: str) -> int | None:
+    value = raw.get(key)
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def _read_float(raw: dict[str, Any], key: str) -> float | None:
+    value = raw.get(key)
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _apply_retry_backoff_fields(raw: dict[str, Any], channel: TelegramChannelConfig | FeishuChannelConfig) -> None:
+    send_max_attempts = _read_int(raw, "send_max_attempts")
+    if send_max_attempts is not None:
+        channel.send_max_attempts = send_max_attempts
+    base_backoff = _read_float(raw, "base_backoff_seconds")
+    if base_backoff is not None:
+        channel.base_backoff_seconds = base_backoff
+    max_backoff = _read_float(raw, "max_backoff_seconds")
+    if max_backoff is not None:
+        channel.max_backoff_seconds = max_backoff
+
+
+def _apply_telegram_config(channel: TelegramChannelConfig, raw: dict[str, Any]) -> None:
+    _apply_channel_toggle(channel, raw)
+    token = _read_str(raw, "bot_token")
+    if token is not None:
+        channel.bot_token = token
+    _apply_retry_backoff_fields(raw, channel)
+
+
+def _apply_feishu_config(channel: FeishuChannelConfig, raw: dict[str, Any]) -> None:
+    _apply_channel_toggle(channel, raw)
+    app_id = _read_str(raw, "app_id")
+    if app_id is not None:
+        channel.app_id = app_id
+    app_secret = _read_str(raw, "app_secret")
+    if app_secret is not None:
+        channel.app_secret = app_secret
+    verify_token = _read_str(raw, "verify_token")
+    if verify_token is not None:
+        channel.verify_token = verify_token
+    encrypt_key = _read_str(raw, "encrypt_key")
+    if encrypt_key is not None:
+        channel.encrypt_key = encrypt_key
+    _apply_retry_backoff_fields(raw, channel)

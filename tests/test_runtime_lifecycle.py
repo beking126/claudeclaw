@@ -1,6 +1,8 @@
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from claudebot_gateway.agent_runtime import AgentExecutionRequest, AgentExecutionResult
 
 
@@ -83,7 +85,7 @@ def test_gateway_app_init_fails_for_unsupported_runtime_provider(tmp_path: Path)
     from claudebot_gateway.config import AgentRuntimeConfig, GatewayConfig
     from claudebot_gateway.runtime import GatewayApp
 
-    try:
+    with pytest.raises(UnsupportedRuntimeProviderError) as exc_info:
         GatewayApp(
             config=GatewayConfig(
                 workspace_root=tmp_path / "workspaces",
@@ -91,9 +93,7 @@ def test_gateway_app_init_fails_for_unsupported_runtime_provider(tmp_path: Path)
                 agent_runtime=AgentRuntimeConfig(provider="not-supported"),
             )
         )
-        assert False
-    except UnsupportedRuntimeProviderError as exc:
-        assert "not-supported" in str(exc)
+    assert "not-supported" in str(exc_info.value)
 
 
 def test_gateway_app_heartbeat_agent_uses_runtime_execution(tmp_path: Path):

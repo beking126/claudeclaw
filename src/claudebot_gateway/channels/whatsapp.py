@@ -1,9 +1,9 @@
-class WhatsAppBridgeChannel:
-    async def start(self) -> None:
-        return None
+from claudebot_gateway.channels.base import BaseChannel
 
-    async def stop(self) -> None:
-        return None
+
+class WhatsAppBridgeChannel(BaseChannel):
+    def __init__(self) -> None:
+        super().__init__()
 
     async def send(self, message: dict[str, str]) -> None:
         _ = message

@@ -2,6 +2,8 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 
 def test_factory_selects_claude_provider(tmp_path: Path):
     from claudebot_gateway.agent_runtime import ClaudeSdkAdapter, create_agent_runtime
@@ -16,11 +18,9 @@ def test_factory_rejects_unknown_provider(tmp_path: Path):
     from claudebot_gateway.config import AgentRuntimeConfig, GatewayConfig
 
     config = GatewayConfig(workspace_root=tmp_path / "workspaces", agent_runtime=AgentRuntimeConfig(provider="unknown"))
-    try:
+    with pytest.raises(UnsupportedRuntimeProviderError) as exc_info:
         create_agent_runtime(config)
-        assert False
-    except UnsupportedRuntimeProviderError as exc:
-        assert "Unsupported agent runtime provider 'unknown'" in str(exc)
+    assert "Unsupported agent runtime provider 'unknown'" in str(exc_info.value)
 
 
 def test_claude_adapter_executes_and_propagates_sdk_options(tmp_path: Path):
@@ -89,12 +89,10 @@ def test_claude_adapter_maps_runtime_errors_without_secret_leaks(tmp_path: Path)
         adapter = ClaudeSdkAdapter(options=ClaudeRuntimeOptions(), query_callable=failing_query)
         await adapter.execute(AgentExecutionRequest(prompt="hello", workspace=tmp_path))
 
-    try:
+    with pytest.raises(AgentRuntimeExecutionError) as exc_info:
         asyncio.run(run())
-        assert False
-    except AgentRuntimeExecutionError as exc:
-        assert "secret-token-123" not in str(exc)
-        assert "Claude runtime execution failed" in str(exc)
+    assert "secret-token-123" not in str(exc_info.value)
+    assert "Claude runtime execution failed" in str(exc_info.value)
 
 
 def test_claude_adapter_supports_keyword_only_query_signature(tmp_path: Path):

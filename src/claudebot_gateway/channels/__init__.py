@@ -1,1 +1,1 @@
-__all__ = ["cli", "telegram", "discord", "feishu", "whatsapp", "slack"]
+__all__ = ["base", "cli", "telegram", "discord", "feishu", "whatsapp", "slack"]
