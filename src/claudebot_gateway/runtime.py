@@ -185,52 +185,13 @@ class GatewayApp:
             inbound_maxsize=config.message_bus.inbound_maxsize,
             outbound_maxsize=config.message_bus.outbound_maxsize,
         )
-        self._adapters: dict[str, Any] = {}
-        channels: dict[str, Any] = {}
-        if config.channels.cli.enabled:
-            cli = CliChannel()
-            self._adapters["cli"] = cli
-            channels["cli"] = cli
-        if config.channels.telegram.enabled:
-            telegram = TelegramChannel(
-                bus=self._bus,
-                token=config.channels.telegram.bot_token,
-                send_max_attempts=config.channels.telegram.send_max_attempts,
-                base_backoff_seconds=config.channels.telegram.base_backoff_seconds,
-                max_backoff_seconds=config.channels.telegram.max_backoff_seconds,
-            )
-            self._adapters["telegram"] = telegram
-            channels["telegram"] = telegram
-        if config.channels.discord.enabled:
-            discord = DiscordChannel()
-            self._adapters["discord"] = discord
-            channels["discord"] = discord
-        if config.channels.feishu.enabled:
-            feishu = FeishuChannel(
-                bus=self._bus,
-                app_id=config.channels.feishu.app_id,
-                app_secret=config.channels.feishu.app_secret,
-                verify_token=config.channels.feishu.verify_token,
-                encrypt_key=config.channels.feishu.encrypt_key,
-                send_max_attempts=config.channels.feishu.send_max_attempts,
-                base_backoff_seconds=config.channels.feishu.base_backoff_seconds,
-                max_backoff_seconds=config.channels.feishu.max_backoff_seconds,
-            )
-            self._adapters["feishu"] = feishu
-            channels["feishu"] = feishu
-        if config.channels.whatsapp.enabled:
-            whatsapp = WhatsAppBridgeChannel()
-            self._adapters["whatsapp"] = whatsapp
-            channels["whatsapp"] = whatsapp
-        if config.channels.slack.enabled:
-            slack = SlackBridgeChannel()
-            self._adapters["slack"] = slack
-            channels["slack"] = slack
+        self._adapters, channels = self._build_channels(config=config, bus=self._bus)
         self._channel_manager = ChannelManager(channels=channels)
+        channel_allowed_senders = self._build_allowed_senders(config)
         self._agent_runner = AgentRunner(
             runtime=self._session_runtime,
             default_workspace=self._workspace_resolver.main(),
-            channel_allowed_senders=self._channel_allowed_senders(config),
+            channel_allowed_senders=channel_allowed_senders,
         )
         self._dispatcher = OutboundDispatcher(adapters=self._adapters)
         self._cron = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
@@ -252,27 +213,70 @@ class GatewayApp:
             signal_provider=self._health_signals,
         )
 
-    def _channel_allowed_senders(self, config: GatewayConfig) -> dict[str, set[str]]:
+    @staticmethod
+    def _build_channels(*, config: GatewayConfig, bus: MessageBus) -> tuple[dict[str, Any], dict[str, Any]]:
+        adapters: dict[str, Any] = {}
+        channels: dict[str, Any] = {}
+        if config.channels.cli.enabled:
+            cli = CliChannel()
+            adapters["cli"] = cli
+            channels["cli"] = cli
+        if config.channels.telegram.enabled:
+            telegram = TelegramChannel(
+                bus=bus,
+                token=config.channels.telegram.bot_token,
+                send_max_attempts=config.channels.telegram.send_max_attempts,
+                base_backoff_seconds=config.channels.telegram.base_backoff_seconds,
+                max_backoff_seconds=config.channels.telegram.max_backoff_seconds,
+            )
+            adapters["telegram"] = telegram
+            channels["telegram"] = telegram
+        if config.channels.discord.enabled:
+            discord = DiscordChannel()
+            adapters["discord"] = discord
+            channels["discord"] = discord
+        if config.channels.feishu.enabled:
+            feishu = FeishuChannel(
+                bus=bus,
+                app_id=config.channels.feishu.app_id,
+                app_secret=config.channels.feishu.app_secret,
+                verify_token=config.channels.feishu.verify_token,
+                encrypt_key=config.channels.feishu.encrypt_key,
+                send_max_attempts=config.channels.feishu.send_max_attempts,
+                base_backoff_seconds=config.channels.feishu.base_backoff_seconds,
+                max_backoff_seconds=config.channels.feishu.max_backoff_seconds,
+            )
+            adapters["feishu"] = feishu
+            channels["feishu"] = feishu
+        if config.channels.whatsapp.enabled:
+            whatsapp = WhatsAppBridgeChannel()
+            adapters["whatsapp"] = whatsapp
+            channels["whatsapp"] = whatsapp
+        if config.channels.slack.enabled:
+            slack = SlackBridgeChannel()
+            adapters["slack"] = slack
+            channels["slack"] = slack
+        return adapters, channels
+
+    @staticmethod
+    def _build_allowed_senders(config: GatewayConfig) -> dict[str, set[str]]:
         channel_senders: dict[str, set[str]] = {}
-        cli_allowed = {sender for sender in config.channels.cli.allowed_senders if sender}
-        if cli_allowed:
-            channel_senders["cli"] = cli_allowed
-        telegram_allowed = {sender for sender in config.channels.telegram.allowed_senders if sender}
-        if telegram_allowed:
-            channel_senders["telegram"] = telegram_allowed
-        discord_allowed = {sender for sender in config.channels.discord.allowed_senders if sender}
-        if discord_allowed:
-            channel_senders["discord"] = discord_allowed
-        feishu_allowed = {sender for sender in config.channels.feishu.allowed_senders if sender}
-        if feishu_allowed:
-            channel_senders["feishu"] = feishu_allowed
-        whatsapp_allowed = {sender for sender in config.channels.whatsapp.allowed_senders if sender}
-        if whatsapp_allowed:
-            channel_senders["whatsapp"] = whatsapp_allowed
-        slack_allowed = {sender for sender in config.channels.slack.allowed_senders if sender}
-        if slack_allowed:
-            channel_senders["slack"] = slack_allowed
+        channel_entries = [
+            ("cli", config.channels.cli.allowed_senders),
+            ("telegram", config.channels.telegram.allowed_senders),
+            ("discord", config.channels.discord.allowed_senders),
+            ("feishu", config.channels.feishu.allowed_senders),
+            ("whatsapp", config.channels.whatsapp.allowed_senders),
+            ("slack", config.channels.slack.allowed_senders),
+        ]
+        for channel_name, allowed_senders in channel_entries:
+            allowed = {sender for sender in allowed_senders if sender}
+            if allowed:
+                channel_senders[channel_name] = allowed
         return channel_senders
+
+    def _channel_allowed_senders(self, config: GatewayConfig) -> dict[str, set[str]]:
+        return self._build_allowed_senders(config)
 
     async def run_once(self, demo_text: str = "") -> None:
         await self._channel_manager.start_all()

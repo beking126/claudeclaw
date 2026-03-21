@@ -214,6 +214,37 @@ def test_gateway_app_wires_enabled_extended_channels(tmp_path: Path):
     assert feishu._send_max_attempts == 6
 
 
+def test_gateway_app_builders_preserve_enabled_channels_and_allowed_senders(tmp_path: Path):
+    from claudebot_gateway.config import ChannelConfig, ChannelToggle, FeishuChannelConfig, GatewayConfig, TelegramChannelConfig
+    from claudebot_gateway.message_bus import MessageBus
+    from claudebot_gateway.runtime import GatewayApp
+
+    config = GatewayConfig(
+        workspace_root=tmp_path / "workspaces",
+        sqlite_path=tmp_path / "state" / "gateway.db",
+        channels=ChannelConfig(
+            cli=ChannelToggle(enabled=True, allowed_senders=["cli-user", ""]),
+            telegram=TelegramChannelConfig(enabled=True, allowed_senders=["tg-user"]),
+            discord=ChannelToggle(enabled=False, allowed_senders=["dc-user"]),
+            feishu=FeishuChannelConfig(enabled=True, allowed_senders=["", "fei-user"]),
+            whatsapp=ChannelToggle(enabled=False, allowed_senders=["wa-user"]),
+            slack=ChannelToggle(enabled=True, allowed_senders=[]),
+        ),
+    )
+    adapters, channels = GatewayApp._build_channels(config=config, bus=MessageBus())
+    allowed = GatewayApp._build_allowed_senders(config)
+
+    assert set(adapters.keys()) == {"cli", "telegram", "feishu", "slack"}
+    assert set(channels.keys()) == {"cli", "telegram", "feishu", "slack"}
+    assert allowed == {
+        "cli": {"cli-user"},
+        "telegram": {"tg-user"},
+        "discord": {"dc-user"},
+        "feishu": {"fei-user"},
+        "whatsapp": {"wa-user"},
+    }
+
+
 def test_gateway_app_wires_health_http_host_and_port(tmp_path: Path):
     from claudebot_gateway.config import GatewayConfig, HealthHttpConfig
     from claudebot_gateway.runtime import GatewayApp
