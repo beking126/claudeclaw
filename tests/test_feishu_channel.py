@@ -284,3 +284,58 @@ def test_feishu_channel_send_retries_then_succeeds():
 
     attempts = asyncio.run(_run())
     assert attempts == 3
+
+
+def test_feishu_channel_ws_client_created_in_ws_thread_and_stop_without_method():
+    from claudebot_gateway.channels.feishu import FeishuChannel
+    from claudebot_gateway.message_bus import MessageBus
+
+    class _ClientWithoutStop:
+        created_with_running_loop = False
+
+        def __init__(self, _app_id: str, _app_secret: str, event_handler, log_level):
+            _ = (event_handler, log_level)
+            try:
+                asyncio.get_running_loop()
+                _ClientWithoutStop.created_with_running_loop = True
+            except RuntimeError:
+                _ClientWithoutStop.created_with_running_loop = False
+            self.started = False
+
+        def start(self) -> None:
+            if _ClientWithoutStop.created_with_running_loop:
+                raise RuntimeError("This event loop is already running")
+            self.started = True
+
+    class _WsModule:
+        Client = _ClientWithoutStop
+
+    def _sdk_without_stop():
+        sdk = _fake_feishu_sdk()
+        sdk["ws"] = _WsModule
+        return sdk
+
+    async def _run() -> tuple[str | None, str | None, bool]:
+        channel = FeishuChannel(
+            bus=MessageBus(),
+            app_id="app-1",
+            app_secret="secret-1",
+            sdk_loader=_sdk_without_stop,
+        )
+        await channel.start()
+        await asyncio.sleep(0.02)
+        running = channel.health()
+        await channel.stop()
+        stopped = channel.health()
+        running_error = running.get("last_error")
+        stopped_error = stopped.get("last_error")
+        return (
+            running_error if isinstance(running_error, str) else None,
+            stopped_error if isinstance(stopped_error, str) else None,
+            bool(running.get("running")),
+        )
+
+    running_error, stopped_error, running = asyncio.run(_run())
+    assert running is True
+    assert running_error is None
+    assert stopped_error is None

@@ -2,6 +2,7 @@ import asyncio
 import importlib
 import json
 import logging
+import sys
 import threading
 from collections import OrderedDict
 from typing import Any
@@ -46,6 +47,7 @@ class FeishuChannel(BaseChannel):
         self._ws_client: Any = None
         self._ws_thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._ws_loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
         if self._running:
@@ -64,36 +66,56 @@ class FeishuChannel(BaseChannel):
             .register_p2_im_message_receive_v1(self._on_message_sync)
             .build()
         )
-        self._ws_client = ws_module.Client(
-            self._app_id,
-            self._app_secret,
-            event_handler=event_handler,
-            log_level=log_level.INFO,
-        )
+        ws_ready = threading.Event()
 
         def _run_ws() -> None:
+            ws_loop = asyncio.new_event_loop()
+            self._ws_loop = ws_loop
+            asyncio.set_event_loop(ws_loop)
             try:
+                self._ws_client = ws_module.Client(
+                    self._app_id,
+                    self._app_secret,
+                    event_handler=event_handler,
+                    log_level=log_level.INFO,
+                )
+                ws_client_module_name = self._ws_client.__class__.__module__ if self._ws_client is not None else ""
+                ws_client_module = sys.modules.get(ws_client_module_name)
+                if ws_client_module is not None and hasattr(ws_client_module, "loop"):
+                    setattr(ws_client_module, "loop", ws_loop)
+                ws_ready.set()
                 if self._ws_client is not None:
                     self._ws_client.start()
             except Exception as exc:
+                ws_ready.set()
                 self._last_error = str(exc)
                 _LOGGER.error("feishu_ws_error error=%s", self._last_error)
+            finally:
+                if not ws_loop.is_closed():
+                    ws_loop.close()
+                asyncio.set_event_loop(None)
 
         self._ws_thread = threading.Thread(target=_run_ws, daemon=True)
         self._ws_thread.start()
+        ws_ready.wait(timeout=1.0)
         self._running = True
         self._last_error = None
+        _LOGGER.info("Feishu channel started!")
 
     async def stop(self) -> None:
         if not self._running:
             return
         self._running = False
         if self._ws_client is not None:
-            try:
-                self._ws_client.stop()
-            except Exception as exc:
-                self._last_error = str(exc)
-                _LOGGER.warning("feishu_ws_stop_failed error=%s", self._last_error)
+            stop_method = getattr(self._ws_client, "stop", None)
+            if callable(stop_method):
+                try:
+                    stop_method()
+                except Exception as exc:
+                    self._last_error = str(exc)
+                    _LOGGER.warning("feishu_ws_stop_failed error=%s", self._last_error)
+        if self._ws_thread is not None:
+            self._ws_thread.join(timeout=1.0)
 
     async def handle_event(self, payload: dict[str, Any], signature: str | None = None) -> bool:
         if not self._running:
@@ -184,6 +206,7 @@ class FeishuChannel(BaseChannel):
         asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
 
     async def _on_message(self, data: Any) -> None:
+        _LOGGER.info(f"Received msg {data}")
         if not self._running:
             return
         if self._bus is None:

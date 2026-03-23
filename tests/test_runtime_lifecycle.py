@@ -71,6 +71,36 @@ def test_gateway_runtime_stop_closes_inbound_intake(tmp_path: Path, gateway_app_
     assert accepted is False
 
 
+def test_gateway_agent_worker_processes_slow_runtime_without_dropping_message(tmp_path: Path):
+    from claudebot_gateway.config import GatewayConfig
+    from claudebot_gateway.runtime import GatewayApp
+
+    class _SlowRuntime:
+        async def execute(self, request):
+            _ = request
+            await asyncio.sleep(0.12)
+            return AgentExecutionResult(text="slow-ok", provider="test")
+
+    async def _run() -> int:
+        app = GatewayApp(
+            config=GatewayConfig(
+                workspace_root=tmp_path / "workspaces",
+                sqlite_path=tmp_path / "state" / "gateway.db",
+            )
+        )
+        app._agent_runner._runtime = _SlowRuntime()
+        await app._bus.publish_inbound({"channel": "feishu", "destination": "oc_test", "text": "hello"})
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(app._agent_worker(stop_event))
+        await asyncio.sleep(0.25)
+        stop_event.set()
+        await asyncio.wait_for(task, timeout=1.0)
+        return app._bus.outbound.qsize()
+
+    outbound_count = asyncio.run(_run())
+    assert outbound_count == 1
+
+
 def test_gateway_app_init_fails_for_unsupported_runtime_provider(tmp_path: Path):
     from claudebot_gateway.agent_runtime import UnsupportedRuntimeProviderError
     from claudebot_gateway.config import AgentRuntimeConfig, GatewayConfig

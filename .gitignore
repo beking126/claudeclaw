@@ -5,3 +5,4 @@ __pycache__/
 
 # Data
 gateway.db
+workspaces/.claudebot/config.json

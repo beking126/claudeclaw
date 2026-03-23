@@ -1,9 +1,13 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
+from claudebot_gateway.channels.base import BaseChannel
+import logging
+
+_LOGGER = logging.getLogger(__name__)
 
 class ChannelManager:
-    def __init__(self, channels: dict[str, Any]):
+    def __init__(self, channels: dict[str, BaseChannel]):
         self._channels = channels
         self._status: dict[str, dict[str, object]] = {
             name: {
@@ -45,19 +49,21 @@ class ChannelManager:
         results = await asyncio.gather(*tasks)
         return dict(results)
 
-    async def _run_start(self, name: str, channel: Any) -> tuple[str, bool]:
+    async def _run_start(self, name: str, channel: BaseChannel) -> tuple[str, bool]:
         try:
+            _LOGGER.info(f"Starting channel {name}...")
             await channel.start()
         except Exception as exc:
             self._status[name]["state"] = "degraded"
             self._status[name]["last_error"] = str(exc)
             self._increment_reconnect_attempts(name)
+            _LOGGER.error(f"Error starting channel {name}: {exc}")
             return name, False
         self._status[name]["state"] = "running"
         self._status[name]["last_error"] = None
         return name, True
 
-    async def _run_stop(self, name: str, channel: Any) -> tuple[str, bool]:
+    async def _run_stop(self, name: str, channel: BaseChannel) -> tuple[str, bool]:
         try:
             await channel.stop()
         except Exception as exc:
@@ -67,13 +73,14 @@ class ChannelManager:
         self._status[name]["state"] = "stopped"
         return name, True
 
-    async def _run_poll_once(self, name: str, channel: Any) -> tuple[str, bool]:
+    async def _run_poll_once(self, name: str, channel: BaseChannel) -> tuple[str, bool]:
         try:
             await channel.poll_once()
         except Exception as exc:
             self._status[name]["state"] = "degraded"
             self._status[name]["last_error"] = str(exc)
             self._increment_reconnect_attempts(name)
+            _LOGGER.error(f"Error polling channel {name}: {exc}")
             return name, False
         if self._status[name]["state"] != "stopped":
             self._status[name]["state"] = "running"

@@ -1,8 +1,11 @@
+import logging
 from pathlib import Path
 from typing import Any
 
 from claudebot_gateway.agent_runtime import AgentExecutionRequest, AgentRuntime
 from claudebot_gateway.message_bus import MessageBus
+
+_LOGGER = logging.getLogger("claudebot_gateway.agent_runner")
 
 
 class AgentRunner:
@@ -27,6 +30,12 @@ class AgentRunner:
         prompt = str(inbound.get("text", ""))
         workspace_raw = inbound.get("workspace")
         workspace = Path(workspace_raw) if isinstance(workspace_raw, str) else self._default_workspace
+        _LOGGER.info(
+            "agent_runner_inbound_received channel=%s destination=%s prompt_len=%s",
+            channel,
+            destination,
+            len(prompt),
+        )
         if not self._is_sender_allowed(channel=channel, inbound=inbound):
             outbound = {
                 "channel": channel,
@@ -34,6 +43,11 @@ class AgentRunner:
                 "text": "Sender is not allowed for this channel.",
             }
             await bus.publish_outbound(outbound)
+            _LOGGER.info(
+                "agent_runner_outbound_published channel=%s destination=%s reason=sender_not_allowed",
+                channel,
+                destination,
+            )
             return outbound
         safe_metadata = self._sanitize_metadata(inbound)
         try:
@@ -47,7 +61,18 @@ class AgentRunner:
                 )
             )
             text = result.text
+            _LOGGER.info(
+                "agent_runner_runtime_succeeded channel=%s destination=%s response_len=%s",
+                channel,
+                destination,
+                len(text),
+            )
         except Exception:
+            _LOGGER.exception(
+                "agent_runner_runtime_failed channel=%s destination=%s",
+                channel,
+                destination,
+            )
             text = "Agent execution failed. Try again shortly."
         outbound = {
             "channel": channel,
@@ -55,6 +80,12 @@ class AgentRunner:
             "text": text,
         }
         await bus.publish_outbound(outbound)
+        _LOGGER.info(
+            "agent_runner_outbound_published channel=%s destination=%s response_len=%s",
+            channel,
+            destination,
+            len(text),
+        )
         return outbound
 
     def _is_sender_allowed(self, *, channel: str, inbound: dict[str, Any]) -> bool:

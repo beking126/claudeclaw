@@ -1,6 +1,9 @@
+import logging
 from typing import Any
 
 from claudebot_gateway.message_bus import MessageBus
+
+_LOGGER = logging.getLogger("claudebot_gateway.outbound_dispatcher")
 
 
 class OutboundDispatcher:
@@ -10,8 +13,19 @@ class OutboundDispatcher:
     async def dispatch_once(self, bus: MessageBus) -> bool:
         outbound = await bus.outbound.get()
         channel = outbound["channel"]
+        destination = str(outbound.get("destination", ""))
         adapter = self._adapters.get(channel)
         if adapter is None:
+            _LOGGER.warning(
+                "outbound_dispatch_missing_adapter channel=%s destination=%s",
+                channel,
+                destination,
+            )
             return False
         await adapter.send(outbound)
+        _LOGGER.info(
+            "outbound_dispatched channel=%s destination=%s",
+            channel,
+            destination,
+        )
         return True

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from pathlib import Path
 
 from claudebot_gateway.message_bus import MessageBus
@@ -96,3 +97,23 @@ def test_runtime_metadata_is_sanitized_before_execution(tracking_runtime):
     assert "authorization" not in metadata
     assert "extra" not in metadata
     assert "meta_list" not in metadata
+
+
+def test_dispatch_flow_emits_observability_logs(collecting_adapter, echo_runtime, caplog):
+    from claudebot_gateway.agent_runner import AgentRunner
+    from claudebot_gateway.outbound_dispatcher import OutboundDispatcher
+
+    async def _run() -> None:
+        bus = MessageBus()
+        runner = AgentRunner(runtime=echo_runtime, default_workspace=Path("workspaces/main"))
+        dispatcher = OutboundDispatcher(adapters={"feishu": collecting_adapter})
+        await bus.publish_inbound({"channel": "feishu", "destination": "oc_test", "text": "hello"})
+        await runner.process_once(bus)
+        await dispatcher.dispatch_once(bus)
+
+    caplog.set_level(logging.INFO)
+    asyncio.run(_run())
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("agent_runner_inbound_received" in message for message in messages)
+    assert any("agent_runner_outbound_published" in message for message in messages)
+    assert any("outbound_dispatched" in message for message in messages)

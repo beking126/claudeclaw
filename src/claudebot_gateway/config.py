@@ -98,7 +98,7 @@ def load_gateway_config(
     workspace_root: Path | None = None,
     sqlite_path: Path | None = None,
 ) -> GatewayConfig:
-    effective_config_path = config_path or Path("claudebot/config.json")
+    effective_config_path = config_path or Path(".claudebot/config.json")
     raw: dict[str, Any] = {}
     if effective_config_path.exists():
         loaded = json.loads(effective_config_path.read_text(encoding="utf-8"))

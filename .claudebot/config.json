@@ -1,0 +1,48 @@
+{
+  "workspace_root": "workspaces",
+  "sqlite_path": "state/gateway.db",
+  "channels": {
+    "cli": {
+      "enabled": false,
+      "allowed_senders": []
+    },
+    "telegram": {
+      "enabled": false,
+      "allowed_senders": [],
+      "bot_token": "",
+      "send_max_attempts": 3,
+      "base_backoff_seconds": 0.5,
+      "max_backoff_seconds": 8.0
+    },
+    "discord": {
+      "enabled": false,
+      "allowed_senders": []
+    },
+    "feishu": {
+      "enabled": true,
+      "allowed_senders": [""],
+      "app_id": "cli_a927832cb9b99bd6",
+      "app_secret": "9gj8BIcgczkPlzVqp8iCGf5pJrpVWjtR",
+      "verify_token": "",
+      "encrypt_key": "",
+      "send_max_attempts": 3,
+      "base_backoff_seconds": 0.5,
+      "max_backoff_seconds": 8.0
+    },
+    "whatsapp": {
+      "enabled": false,
+      "allowed_senders": []
+    },
+    "slack": {
+      "enabled": false,
+      "allowed_senders": []
+    }
+  },
+  "agent_runtime": {
+    "provider": "claude",
+    "claude": {
+      "session_persistence_enabled": true,
+      "session_scope": "workspace_channel_destination"
+    }
+  }
+}

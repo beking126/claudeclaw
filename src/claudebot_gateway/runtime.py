@@ -340,19 +340,29 @@ class GatewayApp:
 
     async def _agent_worker(self, stop_event: asyncio.Event) -> None:
         while not stop_event.is_set():
-            try:
-                await asyncio.wait_for(self._agent_runner.process_once(self._bus), timeout=0.05)
-            except TimeoutError:
+            if self._bus.inbound.empty():
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=0.05)
+                except TimeoutError:
+                    continue
                 continue
+            try:
+                await self._agent_runner.process_once(self._bus)
             except Exception:
                 _LOGGER.exception("agent_worker_process_failed")
 
     async def _dispatch_worker(self, stop_event: asyncio.Event) -> None:
         while not stop_event.is_set():
-            try:
-                await asyncio.wait_for(self._dispatcher.dispatch_once(self._bus), timeout=0.05)
-            except TimeoutError:
+            if self._bus.outbound.empty():
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=0.05)
+                except TimeoutError:
+                    continue
                 continue
+            try:
+                await self._dispatcher.dispatch_once(self._bus)
+            except Exception:
+                _LOGGER.exception("dispatch_worker_process_failed")
 
     async def _heartbeat_worker(self, stop_event: asyncio.Event) -> None:
         interval = max(1, self._config.heartbeat_interval_seconds)
