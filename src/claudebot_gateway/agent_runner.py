@@ -4,6 +4,7 @@ from typing import Any
 
 from claudebot_gateway.agent_runtime import AgentExecutionRequest, AgentRuntime
 from claudebot_gateway.message_bus import MessageBus
+from claudebot_gateway.workspaces import WorkspaceResolver
 
 _LOGGER = logging.getLogger("claudebot_gateway.agent_runner")
 
@@ -22,6 +23,7 @@ class AgentRunner:
         self._runtime = runtime
         self._default_workspace = Path(default_workspace)
         self._channel_allowed_senders = channel_allowed_senders or {}
+        self._workspace_resolver = WorkspaceResolver()
 
     async def process_once(self, bus: MessageBus) -> dict[str, Any]:
         inbound = await bus.inbound.get()
@@ -29,11 +31,14 @@ class AgentRunner:
         destination = str(inbound.get("destination", "cli:stdout"))
         prompt = str(inbound.get("text", ""))
         workspace_raw = inbound.get("workspace")
+        # TODO: resolve workspace from channel and destination/sender
+        # workspace_raw = self._workspace_resolver.channel(channel=channel, channel_id=destination)
         workspace = Path(workspace_raw) if isinstance(workspace_raw, str) else self._default_workspace
         _LOGGER.info(
-            "agent_runner_inbound_received channel=%s destination=%s prompt_len=%s",
+            "agent_runner_inbound_received channel=%s destination=%s workspace=%s prompt_len=%s",
             channel,
             destination,
+            workspace,
             len(prompt),
         )
         if not self._is_sender_allowed(channel=channel, inbound=inbound):
