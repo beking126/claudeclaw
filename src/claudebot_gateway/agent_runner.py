@@ -4,7 +4,7 @@ from typing import Any
 
 from claudebot_gateway.agent_runtime import AgentExecutionRequest, AgentRuntime
 from claudebot_gateway.message_bus import MessageBus
-from claudebot_gateway.workspaces import WorkspaceResolver
+from claudebot_gateway.workspaces import validate_workspace_path
 
 _LOGGER = logging.getLogger("claudebot_gateway.agent_runner")
 
@@ -23,7 +23,6 @@ class AgentRunner:
         self._runtime = runtime
         self._default_workspace = Path(default_workspace)
         self._channel_allowed_senders = channel_allowed_senders or {}
-        self._workspace_resolver = WorkspaceResolver(self._default_workspace)
 
     async def process_once(self, bus: MessageBus) -> dict[str, Any]:
         inbound = await bus.inbound.get()
@@ -33,10 +32,11 @@ class AgentRunner:
         workspace_raw = inbound.get("workspace")
         if isinstance(workspace_raw, str):
             candidate = (self._default_workspace / workspace_raw).resolve()
-            if not candidate.is_relative_to(self._default_workspace.resolve()):
+            try:
+                workspace = validate_workspace_path(candidate, self._default_workspace)
+            except ValueError:
                 _LOGGER.warning("agent_runner_workspace_escape_rejected raw=%s", workspace_raw)
-                candidate = self._default_workspace
-            workspace = candidate
+                workspace = self._default_workspace
         else:
             workspace = self._default_workspace
         _LOGGER.info(
@@ -116,10 +116,19 @@ class AgentRunner:
 
     def _sanitize_metadata(self, inbound: dict[str, Any]) -> dict[str, Any]:
         sanitized: dict[str, Any] = {}
+        skipped_keys: list[str] = []
+        skipped_complex: list[str] = []
         for key, value in inbound.items():
             key_lower = key.lower()
             if any(token in key_lower for token in self._SENSITIVE_TOKENS):
+                skipped_keys.append(key)
                 continue
             if isinstance(value, str | int | float | bool) or value is None:
                 sanitized[key] = value
+            else:
+                skipped_complex.append(f"{key}=<{type(value).__name__}>")
+        if skipped_keys:
+            _LOGGER.debug("metadata_sensitive_keys_dropped keys=%s", skipped_keys)
+        if skipped_complex:
+            _LOGGER.debug("metadata_complex_values_dropped fields=%s", skipped_complex)
         return sanitized

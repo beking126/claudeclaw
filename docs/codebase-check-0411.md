@@ -63,9 +63,9 @@
 
   Tier 2 — New capabilities
 
-  6. Discord adapter — Using discord.py or nextcord. Most of the channel interface is already defined (start, stop, poll_once, send). Telegram and
+  6. [Low Priority] Discord adapter — Using discord.py or nextcord. Most of the channel interface is already defined (start, stop, poll_once, send). Telegram and
   Feishu are the reference implementations.
-  7. Slack adapter — Using Slack Bolt (slack_bolt + slack_sdk). Similar pattern to Telegram: webhook or WebSocket-based event consumption + REST API
+  7. [Low Priority] Slack adapter — Using Slack Bolt (slack_bolt + slack_sdk). Similar pattern to Telegram: webhook or WebSocket-based event consumption + REST API
    for sending.
   8. Message history / conversation context — Persist per-session message history in SQLite and inject it as context before each agent turn. The
   agent_turns table already stores prompts and responses but nothing reads them back for context injection.

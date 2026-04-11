@@ -303,6 +303,7 @@ class GatewayApp:
         await self._health.start_http_if_enabled()
         try:
             if demo_text:
+                initial_depth = self._bus.outbound.qsize()
                 await self._bus.publish_inbound(
                     {
                         "channel": "cli",
@@ -310,12 +311,23 @@ class GatewayApp:
                         "text": demo_text,
                     }
                 )
-                # Wait for the agent to process the message.
-                await asyncio.sleep(30)
+                await self._wait_for_outbound(initial_depth, timeout=10.0)
+            else:
+                # Allow background workers (heartbeat, cron) at least one cycle.
+                await asyncio.sleep(1.0)
         finally:
             await self._health.stop_http_if_started()
             await self._runtime.stop()
             await self._channel_manager.stop_all()
+
+    async def _wait_for_outbound(self, initial_depth: int, *, timeout: float = 10.0) -> None:
+        deadline = asyncio.get_event_loop().time() + timeout
+        while self._bus.outbound.qsize() <= initial_depth:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                _LOGGER.warning("run_once_outbound_wait_timeout")
+                return
+            await asyncio.sleep(0.05)
 
     async def run_forever(self) -> None:
         await self._channel_manager.start_all()

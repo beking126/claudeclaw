@@ -345,6 +345,16 @@ class SqliteStore:
         ).fetchall()
         return [self._row_to_cron_job(row) for row in rows]
 
+    def list_all_cron_jobs(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """
+            SELECT job_id, prompt, channel, destination, interval_seconds, schedule_kind, schedule_value, next_run_epoch_seconds
+            FROM cron_jobs
+            ORDER BY next_run_epoch_seconds ASC
+            """
+        ).fetchall()
+        return [self._row_to_cron_job(row) for row in rows]
+
     def update_cron_job_next_run(self, *, job_id: str, next_run_epoch_seconds: float) -> None:
         self._conn.execute(
             """

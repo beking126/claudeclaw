@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 
 def test_base_channel_provides_default_lifecycle():
@@ -64,3 +65,21 @@ def test_cli_channel_send_empty_text_does_not_crash(capsys):
     asyncio.run(_run())
     captured = capsys.readouterr()
     assert captured.out == ""
+
+
+def test_stub_channels_log_warning_on_send(caplog):
+    from claudebot_gateway.channels.discord import DiscordChannel
+    from claudebot_gateway.channels.slack import SlackBridgeChannel
+    from claudebot_gateway.channels.whatsapp import WhatsAppBridgeChannel
+
+    async def _run() -> None:
+        for cls in (DiscordChannel, SlackBridgeChannel, WhatsAppBridgeChannel):
+            channel = cls()
+            await channel.send({"channel": "stub", "destination": "x", "text": "hello"})
+
+    caplog.set_level(logging.WARNING)
+    asyncio.run(_run())
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("discord_send_stub" in m for m in messages)
+    assert any("slack_send_stub" in m for m in messages)
+    assert any("whatsapp_send_stub" in m for m in messages)

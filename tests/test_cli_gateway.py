@@ -199,4 +199,170 @@ def test_agent_command_rejects_workspace_traversal(tmp_path: Path, capsys, monke
     )
     captured = capsys.readouterr()
     assert exit_code == 1
-    assert "escapes workspace root" in captured.err
+    assert captured.err.strip() == 'error: workspace "../../etc" escapes workspace root'
+
+
+def _cron_argv(tmp_path: Path, action_args: list[str]) -> list[str]:
+    return [
+        "cron",
+        *action_args,
+        "--workspace-root", str(tmp_path / "workspaces"),
+        "--db-path", str(tmp_path / "state" / "gateway.db"),
+    ]
+
+
+def test_cron_add_every_job(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main(_cron_argv(tmp_path, [
+        "add", "--prompt", "daily report", "--channel", "telegram",
+        "--destination", "chat:1", "--every", "3600",
+    ]))
+    assert exit_code == 0
+    assert "scheduled" in capsys.readouterr().out
+
+
+def test_cron_add_at_job(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main(_cron_argv(tmp_path, [
+        "add", "--prompt", "one-shot", "--channel", "cli",
+        "--destination", "cli:stdout", "--at", "1700000000",
+    ]))
+    assert exit_code == 0
+    assert "scheduled" in capsys.readouterr().out
+
+
+def test_cron_add_cron_expression_job(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main(_cron_argv(tmp_path, [
+        "add", "--prompt", "every 5 min", "--channel", "telegram",
+        "--destination", "chat:2", "--cron", "*/5 * * * *",
+    ]))
+    assert exit_code == 0
+    assert "scheduled" in capsys.readouterr().out
+
+
+def test_cron_add_requires_schedule_flag(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main(_cron_argv(tmp_path, [
+        "add", "--prompt", "no schedule", "--channel", "cli",
+        "--destination", "cli:stdout",
+    ]))
+    assert exit_code == 1
+    assert "one of --every, --at, or --cron is required" in capsys.readouterr().err
+
+
+def test_cron_add_with_custom_job_id(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main(_cron_argv(tmp_path, [
+        "add", "--prompt", "named job", "--channel", "cli",
+        "--destination", "cli:stdout", "--every", "60",
+        "--job-id", "my-custom-id",
+    ]))
+    assert exit_code == 0
+    assert "scheduled my-custom-id" in capsys.readouterr().out
+
+
+def test_cron_list_shows_jobs(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    main(_cron_argv(tmp_path, [
+        "add", "--prompt", "job alpha", "--channel", "telegram",
+        "--destination", "chat:1", "--every", "3600",
+        "--job-id", "alpha",
+    ]))
+    main(_cron_argv(tmp_path, [
+        "add", "--prompt", "job beta", "--channel", "cli",
+        "--destination", "cli:stdout", "--every", "60",
+        "--job-id", "beta",
+    ]))
+    exit_code = main(_cron_argv(tmp_path, ["list"]))
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "alpha" in output
+    assert "beta" in output
+
+
+def test_cron_list_empty(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main(_cron_argv(tmp_path, ["list"]))
+    assert exit_code == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_cron_remove_job(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    main(_cron_argv(tmp_path, [
+        "add", "--prompt", "to remove", "--channel", "cli",
+        "--destination", "cli:stdout", "--every", "60",
+        "--job-id", "doomed",
+    ]))
+    exit_code = main(_cron_argv(tmp_path, ["remove", "--job-id", "doomed"]))
+    assert exit_code == 0
+    assert "removed doomed" in capsys.readouterr().out
+    # Verify it's gone
+    exit_code = main(_cron_argv(tmp_path, ["list"]))
+    assert capsys.readouterr().out == ""
+
+
+def test_cron_remove_missing_job(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main(_cron_argv(tmp_path, ["remove", "--job-id", "nonexistent"]))
+    assert exit_code == 1
+    assert "not found" in capsys.readouterr().err
+
+
+def test_validate_ok_with_defaults(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main([
+        "validate",
+        "--workspace-root", str(tmp_path / "workspaces"),
+        "--db-path", str(tmp_path / "state" / "gateway.db"),
+    ])
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "ok" in output
+    assert "provider=claude" in output
+
+
+def test_validate_detects_telegram_enabled_without_token(tmp_path: Path, capsys, monkeypatch):
+    from claudebot_gateway.cli import main
+
+    config_dir = tmp_path / ".claudebot"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.json").write_text(
+        '{"channels":{"telegram":{"enabled":true}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    exit_code = main([
+        "validate",
+        "--workspace-root", str(tmp_path / "workspaces"),
+        "--db-path", str(tmp_path / "state" / "gateway.db"),
+    ])
+    assert exit_code == 1
+    assert "telegram enabled but bot_token" in capsys.readouterr().err
+
+
+def test_validate_detects_invalid_config_json(tmp_path: Path, capsys, monkeypatch):
+    from claudebot_gateway.cli import main
+
+    config_dir = tmp_path / ".claudebot"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.json").write_text("not json", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    exit_code = main([
+        "validate",
+        "--workspace-root", str(tmp_path / "workspaces"),
+        "--db-path", str(tmp_path / "state" / "gateway.db"),
+    ])
+    assert exit_code == 1
+    assert "parse error" in capsys.readouterr().err

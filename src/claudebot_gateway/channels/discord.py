@@ -1,4 +1,8 @@
+import logging
+
 from claudebot_gateway.channels.base import BaseChannel
+
+_LOGGER = logging.getLogger("claudebot_gateway.channels.discord")
 
 
 class DiscordChannel(BaseChannel):
@@ -6,4 +10,4 @@ class DiscordChannel(BaseChannel):
         super().__init__()
 
     async def send(self, message: dict[str, str]) -> None:
-        _ = message
+        _LOGGER.warning("discord_send_stub channel not implemented, message dropped")

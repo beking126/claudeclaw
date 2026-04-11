@@ -99,6 +99,28 @@ def test_runtime_metadata_is_sanitized_before_execution(tracking_runtime):
     assert "meta_list" not in metadata
 
 
+def test_metadata_sanitization_logs_dropped_fields(tracking_runtime, caplog):
+    from claudebot_gateway.agent_runner import AgentRunner
+
+    async def _run() -> None:
+        bus = MessageBus()
+        runner = AgentRunner(runtime=tracking_runtime, default_workspace=Path("workspaces/main"))
+        await bus.publish_inbound({
+            "channel": "cli",
+            "destination": "cli:stdout",
+            "text": "hi",
+            "api_key": "leaked",
+            "metadata": {"nested": "value"},
+        })
+        await runner.process_once(bus)
+
+    caplog.set_level(logging.DEBUG)
+    asyncio.run(_run())
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("metadata_sensitive_keys_dropped" in m for m in messages)
+    assert any("metadata_complex_values_dropped" in m for m in messages)
+
+
 def test_dispatch_flow_emits_observability_logs(collecting_adapter, echo_runtime, caplog):
     from claudebot_gateway.agent_runner import AgentRunner
     from claudebot_gateway.outbound_dispatcher import OutboundDispatcher
@@ -159,4 +181,37 @@ def test_workspace_traversal_with_valid_subdirectory(tracking_runtime, tmp_path:
         return tracking_runtime.requests[0].workspace
 
     used_workspace = asyncio.run(_run())
+    assert used_workspace == (default_workspace / "subproject").resolve()
+
+
+def test_workspace_path_uses_validate_workspace_path(monkeypatch, tracking_runtime, tmp_path: Path):
+    from claudebot_gateway.agent_runner import AgentRunner
+
+    default_workspace = tmp_path / "workspaces" / "main"
+    default_workspace.mkdir(parents=True, exist_ok=True)
+    calls = {"count": 0}
+
+    def _validate(path: Path, root: Path) -> Path:
+        calls["count"] += 1
+        assert root == default_workspace
+        return path.resolve()
+
+    monkeypatch.setattr("claudebot_gateway.agent_runner.validate_workspace_path", _validate)
+
+    async def _run() -> Path:
+        bus = MessageBus()
+        runner = AgentRunner(runtime=tracking_runtime, default_workspace=default_workspace)
+        await bus.publish_inbound(
+            {
+                "channel": "cli",
+                "destination": "cli:stdout",
+                "text": "hi",
+                "workspace": "subproject",
+            }
+        )
+        await runner.process_once(bus)
+        return tracking_runtime.requests[0].workspace
+
+    used_workspace = asyncio.run(_run())
+    assert calls["count"] == 1
     assert used_workspace == (default_workspace / "subproject").resolve()
