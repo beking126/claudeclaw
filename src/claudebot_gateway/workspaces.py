@@ -51,6 +51,13 @@ def compose_workspace_prompt(prompt: str, prompt_files: dict[str, str]) -> str:
     return "\n\n".join(blocks)
 
 
+def validate_workspace_path(path: Path, root: Path) -> Path:
+    resolved = path.resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise ValueError(f"workspace path escapes root: {resolved}")
+    return resolved
+
+
 class WorkspaceResolver:
     def __init__(self, root: Path):
         self._root = Path(root)

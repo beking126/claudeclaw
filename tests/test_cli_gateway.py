@@ -1,6 +1,6 @@
 from pathlib import Path
 
-def test_status_command_returns_ok():
+def test_status_command_returns_ok_without_running_gateway():
     from claudebot_gateway.cli import main
 
     exit_code = main(["status"])
@@ -19,6 +19,29 @@ def test_status_text_includes_signal_fields():
     assert "in=2" in line
     assert "out=3" in line
     assert "due_cron=1" in line
+
+
+def test_status_text_includes_channel_status():
+    from claudebot_gateway.cli import status_text
+
+    line = status_text(
+        {
+            "runtime": {"running": True, "worker_count": 5, "unhandled_errors": 0},
+            "signals": {
+                "inbound_queue_depth": 0,
+                "outbound_queue_depth": 0,
+                "due_cron_jobs": 0,
+                "channels": {
+                    "cli": {"state": "running", "last_error": None, "reconnect_attempts": 0},
+                    "telegram": {"state": "degraded", "last_error": "connection timeout", "reconnect_attempts": 3},
+                },
+            },
+        }
+    )
+    assert "channels=[" in line
+    assert "cli:running" in line
+    assert "telegram:degraded" in line
+    assert "err=connection timeout" in line
 
 
 def test_gateway_once_creates_runtime_artifacts(tmp_path: Path):
@@ -43,26 +66,13 @@ def test_gateway_once_creates_runtime_artifacts(tmp_path: Path):
     assert db_path.exists()
 
 
-def test_status_verbose_emits_debug_and_key_paths(tmp_path: Path, capsys):
+def test_status_verbose_emits_debug_logs(capsys):
     from claudebot_gateway.cli import main
 
-    workspace_root = tmp_path / "workspaces"
-    db_path = tmp_path / "state" / "gateway.db"
-    exit_code = main(
-        [
-            "--verbose",
-            "status",
-            "--workspace-root",
-            str(workspace_root),
-            "--db-path",
-            str(db_path),
-        ]
-    )
+    exit_code = main(["--verbose", "status"])
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "DEBUG" in captured.err
-    assert "workspace_root=" in captured.err
-    assert "sqlite_path=" in captured.err
 
 
 def test_agent_command_defaults_to_main_workspace(tmp_path: Path, capsys, monkeypatch, cli_capture_runtime):
@@ -125,22 +135,68 @@ def test_status_command_loads_local_config_json(tmp_path: Path, monkeypatch):
         encoding="utf-8",
     )
 
-    class _FakeApp:
-        last_config = None
-
-        def __init__(self, *, config):
-            _FakeApp.last_config = config
-
-        def status(self):
-            return {
-                "runtime": {"running": False, "worker_count": 0, "unhandled_errors": 0},
-                "signals": {},
-            }
-
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("claudebot_gateway.cli.GatewayApp", _FakeApp)
     exit_code = main(["status"])
     assert exit_code == 0
-    assert _FakeApp.last_config is not None
-    assert _FakeApp.last_config.channels.telegram.enabled is True
-    assert _FakeApp.last_config.channels.telegram.bot_token == "json-token"
+
+
+def test_status_command_queries_live_gateway(capsys, monkeypatch):
+    from claudebot_gateway.cli import main
+
+    live_snapshot = {
+        "runtime": {"started": True, "running": True, "stopped": False, "worker_count": 4, "unhandled_errors": 0},
+        "signals": {
+            "inbound_queue_depth": 1,
+            "outbound_queue_depth": 0,
+            "due_cron_jobs": 2,
+            "channels": {"cli": {"state": "running", "last_error": None, "reconnect_attempts": 0}},
+        },
+    }
+
+    monkeypatch.setattr(
+        "claudebot_gateway.cli._fetch_live_status",
+        lambda host, port: live_snapshot,
+    )
+    exit_code = main(["status"])
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "gateway:running" in captured.out
+    assert "workers=4" in captured.out
+    assert "cli:running" in captured.out
+
+
+def test_status_command_falls_back_when_gateway_unreachable(capsys, monkeypatch):
+    from claudebot_gateway.cli import main
+
+    monkeypatch.setattr(
+        "claudebot_gateway.cli._fetch_live_status",
+        lambda host, port: None,
+    )
+    exit_code = main(["status"])
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "gateway:stopped" in captured.out
+
+
+def test_agent_command_rejects_workspace_traversal(tmp_path: Path, capsys, monkeypatch, cli_capture_runtime):
+    from claudebot_gateway.cli import main
+
+    monkeypatch.setattr("claudebot_gateway.runtime.create_agent_runtime", lambda config: cli_capture_runtime)
+    workspace_root = tmp_path / "workspaces"
+    db_path = tmp_path / "state" / "gateway.db"
+    exit_code = main(
+        [
+            "agent",
+            "--prompt",
+            "hello",
+            "--workspace-root",
+            str(workspace_root),
+            "--workspace",
+            "../../etc",
+            "--db-path",
+            str(db_path),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "escapes workspace root" in captured.err

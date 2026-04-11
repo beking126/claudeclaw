@@ -67,3 +67,26 @@ def test_health_snapshot_includes_operational_signals(tmp_path):
     assert signals["inbound_queue_depth"] == 0
     assert signals["outbound_queue_depth"] == 0
     assert "due_cron_jobs" in signals
+
+
+def test_health_snapshot_includes_channel_status(tmp_path):
+    import asyncio
+
+    from claudebot_gateway.config import GatewayConfig
+    from claudebot_gateway.runtime import GatewayApp
+
+    async def _run() -> dict[str, object]:
+        app = GatewayApp(
+            config=GatewayConfig(
+                workspace_root=tmp_path / "workspaces",
+                sqlite_path=tmp_path / "state" / "gateway.db",
+            )
+        )
+        return app.status()
+
+    snapshot = asyncio.run(_run())
+    signals = snapshot["signals"]
+    channels = signals.get("channels")
+    assert isinstance(channels, dict)
+    assert "cli" in channels
+    assert channels["cli"]["state"] == "stopped"

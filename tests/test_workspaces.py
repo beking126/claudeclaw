@@ -46,3 +46,37 @@ def test_prompt_file_loader_tolerates_missing_files(tmp_path: Path):
     assert loaded["SOUL.md"] == ""
     assert loaded["USER.md"] == ""
     assert loaded["TOOLS.md"] == ""
+
+
+def test_validate_workspace_path_rejects_traversal(tmp_path: Path):
+    import pytest
+    from claudebot_gateway.workspaces import validate_workspace_path
+
+    root = tmp_path / "workspaces"
+    with pytest.raises(ValueError, match="escapes root"):
+        validate_workspace_path(root / ".." / "etc", root)
+
+
+def test_validate_workspace_path_rejects_absolute_outside_root(tmp_path: Path):
+    import pytest
+    from claudebot_gateway.workspaces import validate_workspace_path
+
+    root = tmp_path / "workspaces"
+    with pytest.raises(ValueError, match="escapes root"):
+        validate_workspace_path(Path("/etc/passwd"), root)
+
+
+def test_validate_workspace_path_accepts_valid_subdirectory(tmp_path: Path):
+    from claudebot_gateway.workspaces import validate_workspace_path
+
+    root = tmp_path / "workspaces"
+    result = validate_workspace_path(root / "main", root)
+    assert result == (root / "main").resolve()
+
+
+def test_validate_workspace_path_accepts_root_itself(tmp_path: Path):
+    from claudebot_gateway.workspaces import validate_workspace_path
+
+    root = tmp_path / "workspaces"
+    result = validate_workspace_path(root, root)
+    assert result == root.resolve()

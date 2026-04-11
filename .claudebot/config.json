@@ -3,7 +3,7 @@
   "sqlite_path": "state/gateway.db",
   "channels": {
     "cli": {
-      "enabled": false,
+      "enabled": true,
       "allowed_senders": []
     },
     "telegram": {

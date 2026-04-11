@@ -117,3 +117,46 @@ def test_dispatch_flow_emits_observability_logs(collecting_adapter, echo_runtime
     assert any("agent_runner_inbound_received" in message for message in messages)
     assert any("agent_runner_outbound_published" in message for message in messages)
     assert any("outbound_dispatched" in message for message in messages)
+
+
+def test_workspace_traversal_falls_back_to_default(tracking_runtime):
+    from claudebot_gateway.agent_runner import AgentRunner
+
+    default_workspace = Path("workspaces/main")
+
+    async def _run() -> Path:
+        bus = MessageBus()
+        runner = AgentRunner(runtime=tracking_runtime, default_workspace=default_workspace)
+        await bus.publish_inbound({
+            "channel": "cli",
+            "destination": "cli:stdout",
+            "text": "hi",
+            "workspace": "../../etc",
+        })
+        await runner.process_once(bus)
+        return tracking_runtime.requests[0].workspace
+
+    used_workspace = asyncio.run(_run())
+    assert used_workspace == default_workspace
+
+
+def test_workspace_traversal_with_valid_subdirectory(tracking_runtime, tmp_path: Path):
+    from claudebot_gateway.agent_runner import AgentRunner
+
+    default_workspace = tmp_path / "workspaces" / "main"
+    default_workspace.mkdir(parents=True, exist_ok=True)
+
+    async def _run() -> Path:
+        bus = MessageBus()
+        runner = AgentRunner(runtime=tracking_runtime, default_workspace=default_workspace)
+        await bus.publish_inbound({
+            "channel": "cli",
+            "destination": "cli:stdout",
+            "text": "hi",
+            "workspace": "subproject",
+        })
+        await runner.process_once(bus)
+        return tracking_runtime.requests[0].workspace
+
+    used_workspace = asyncio.run(_run())
+    assert used_workspace == (default_workspace / "subproject").resolve()

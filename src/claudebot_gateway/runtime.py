@@ -310,7 +310,8 @@ class GatewayApp:
                         "text": demo_text,
                     }
                 )
-            await asyncio.sleep(50)
+                # Wait for the agent to process the message.
+                await asyncio.sleep(30)
         finally:
             await self._health.stop_http_if_started()
             await self._runtime.stop()
@@ -336,6 +337,7 @@ class GatewayApp:
             "outbound_queue_depth": self._bus.outbound.qsize(),
             "due_cron_jobs": self._cron.due_job_count(),
             "last_heartbeat_run": self._heartbeat.get_last_run(),
+            "channels": self._channel_manager.status_snapshot(),
         }
 
     async def _agent_worker(self, stop_event: asyncio.Event) -> None:

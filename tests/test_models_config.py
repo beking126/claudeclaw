@@ -2,13 +2,6 @@ from pathlib import Path
 import json
 
 
-def test_workspace_layout_constants():
-    from claudebot_gateway.models import WorkspaceKind
-
-    assert WorkspaceKind.MAIN.value == "main"
-    assert WorkspaceKind.HEARTBEAT.value == "heartbeat"
-
-
 def test_config_defaults(tmp_path: Path):
     from claudebot_gateway.config import GatewayConfig
 

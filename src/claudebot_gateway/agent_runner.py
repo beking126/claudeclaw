@@ -23,7 +23,7 @@ class AgentRunner:
         self._runtime = runtime
         self._default_workspace = Path(default_workspace)
         self._channel_allowed_senders = channel_allowed_senders or {}
-        self._workspace_resolver = WorkspaceResolver()
+        self._workspace_resolver = WorkspaceResolver(self._default_workspace)
 
     async def process_once(self, bus: MessageBus) -> dict[str, Any]:
         inbound = await bus.inbound.get()
@@ -31,9 +31,14 @@ class AgentRunner:
         destination = str(inbound.get("destination", "cli:stdout"))
         prompt = str(inbound.get("text", ""))
         workspace_raw = inbound.get("workspace")
-        # TODO: resolve workspace from channel and destination/sender
-        # workspace_raw = self._workspace_resolver.channel(channel=channel, channel_id=destination)
-        workspace = Path(workspace_raw) if isinstance(workspace_raw, str) else self._default_workspace
+        if isinstance(workspace_raw, str):
+            candidate = (self._default_workspace / workspace_raw).resolve()
+            if not candidate.is_relative_to(self._default_workspace.resolve()):
+                _LOGGER.warning("agent_runner_workspace_escape_rejected raw=%s", workspace_raw)
+                candidate = self._default_workspace
+            workspace = candidate
+        else:
+            workspace = self._default_workspace
         _LOGGER.info(
             "agent_runner_inbound_received channel=%s destination=%s workspace=%s prompt_len=%s",
             channel,

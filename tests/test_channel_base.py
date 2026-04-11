@@ -40,3 +40,27 @@ def test_concrete_channels_implement_base_channel():
         SlackBridgeChannel(),
     ]
     assert all(isinstance(channel, BaseChannel) for channel in instances)
+
+
+def test_cli_channel_send_prints_text_to_stdout(capsys):
+    from claudebot_gateway.channels.cli import CliChannel
+
+    async def _run() -> None:
+        channel = CliChannel()
+        await channel.send({"channel": "cli", "destination": "cli:stdout", "text": "hello world"})
+
+    asyncio.run(_run())
+    captured = capsys.readouterr()
+    assert "hello world" in captured.out
+
+
+def test_cli_channel_send_empty_text_does_not_crash(capsys):
+    from claudebot_gateway.channels.cli import CliChannel
+
+    async def _run() -> None:
+        channel = CliChannel()
+        await channel.send({"channel": "cli", "destination": "cli:stdout", "text": ""})
+
+    asyncio.run(_run())
+    captured = capsys.readouterr()
+    assert captured.out == ""
