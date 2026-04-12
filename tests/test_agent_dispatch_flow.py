@@ -141,6 +141,26 @@ def test_dispatch_flow_emits_observability_logs(collecting_adapter, echo_runtime
     assert any("outbound_dispatched" in message for message in messages)
 
 
+def test_dispatch_continues_after_adapter_send_failure(echo_runtime):
+    from claudebot_gateway.agent_runner import AgentRunner
+    from claudebot_gateway.outbound_dispatcher import OutboundDispatcher
+
+    class _FailingAdapter:
+        async def send(self, message):
+            raise RuntimeError("channel is down")
+
+    async def _run() -> bool:
+        bus = MessageBus()
+        runner = AgentRunner(runtime=echo_runtime, default_workspace=Path("workspaces/main"))
+        dispatcher = OutboundDispatcher(adapters={"telegram": _FailingAdapter()})
+        await bus.publish_inbound({"channel": "telegram", "destination": "chat:1", "text": "hi"})
+        await runner.process_once(bus)
+        return await dispatcher.dispatch_once(bus)
+
+    result = asyncio.run(_run())
+    assert result is False
+
+
 def test_workspace_traversal_falls_back_to_default(tracking_runtime):
     from claudebot_gateway.agent_runner import AgentRunner
 

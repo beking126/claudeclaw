@@ -9,8 +9,8 @@ HeartbeatAgentFunc = Callable[[str, Path], Awaitable[str]]
 
 
 class HeartbeatService:
-    def __init__(self, db_path: Path, workspace_root: Path):
-        self._store = SqliteStore(db_path=db_path)
+    def __init__(self, db_path: Path, workspace_root: Path, *, store: SqliteStore | None = None):
+        self._store = store or SqliteStore(db_path=db_path)
         self._resolver = WorkspaceResolver(workspace_root)
 
     async def run_once(self, *, source_text: str, agent_func: HeartbeatAgentFunc) -> bool:

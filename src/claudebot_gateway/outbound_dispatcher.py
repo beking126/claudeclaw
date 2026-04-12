@@ -22,7 +22,15 @@ class OutboundDispatcher:
                 destination,
             )
             return False
-        await adapter.send(outbound)
+        try:
+            await adapter.send(outbound)
+        except Exception:
+            _LOGGER.exception(
+                "outbound_dispatch_failed channel=%s destination=%s",
+                channel,
+                destination,
+            )
+            return False
         _LOGGER.info(
             "outbound_dispatched channel=%s destination=%s",
             channel,

@@ -18,11 +18,12 @@ class CronService:
         db_path: Path,
         workspace_root: Path,
         *,
+        store: SqliteStore | None = None,
         delivery_max_attempts: int = 3,
         delivery_retry_backoff_seconds: float = 0.05,
         delivery_retry_backoff_max_seconds: float = 0.5,
     ):
-        self._store = SqliteStore(db_path=db_path)
+        self._store = store or SqliteStore(db_path=db_path)
         self._resolver = WorkspaceResolver(workspace_root)
         self._delivery_max_attempts = max(1, delivery_max_attempts)
         self._delivery_retry_backoff_seconds = max(0.0, delivery_retry_backoff_seconds)

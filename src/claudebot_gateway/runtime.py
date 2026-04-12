@@ -274,8 +274,8 @@ class GatewayApp:
             channel_allowed_senders=channel_allowed_senders,
         )
         dispatcher = OutboundDispatcher(adapters=self._adapters)
-        cron = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
-        heartbeat = HeartbeatService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
+        cron = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root, store=self._store)
+        heartbeat = HeartbeatService(db_path=config.sqlite_path, workspace_root=config.workspace_root, store=self._store)
         runtime = GatewayRuntime(
             workers=[
                 self._agent_worker,

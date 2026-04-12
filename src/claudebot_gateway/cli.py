@@ -4,6 +4,7 @@ import json
 import logging
 import sys
 import uuid
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import URLError
@@ -127,7 +128,6 @@ def _handle_cron_add(args: argparse.Namespace) -> int:
     )
     job_id = args.job_id or f"cron_{uuid.uuid4().hex[:8]}"
     store = SqliteStore(db_path=config.sqlite_path)
-    import time
 
     now = time.time()
     if args.every is not None:
