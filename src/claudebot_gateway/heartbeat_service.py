@@ -10,6 +10,14 @@ HeartbeatAgentFunc = Callable[[str, Path], Awaitable[str]]
 
 class HeartbeatService:
     def __init__(self, db_path: Path, workspace_root: Path, *, store: SqliteStore | None = None):
+        """
+        Initialize heartbeat service.
+
+        Args:
+            db_path: SQLite database path for persistence fallback.
+            workspace_root: Root directory used for heartbeat workspace.
+            store (SqliteStore | None): Optional injected persistence store for tests/integration.
+        """
         self._store = store or SqliteStore(db_path=db_path)
         self._resolver = WorkspaceResolver(workspace_root)
 

@@ -23,6 +23,17 @@ class CronService:
         delivery_retry_backoff_seconds: float = 0.05,
         delivery_retry_backoff_max_seconds: float = 0.5,
     ):
+        """
+        Initialize cron execution service.
+
+        Args:
+            db_path: SQLite database path for persistence fallback.
+            workspace_root: Root directory used for cron workspaces.
+            store (SqliteStore | None): Optional injected persistence store for tests/integration.
+            delivery_max_attempts: Maximum outbound delivery attempts per run.
+            delivery_retry_backoff_seconds: Initial retry backoff in seconds.
+            delivery_retry_backoff_max_seconds: Maximum retry backoff in seconds.
+        """
         self._store = store or SqliteStore(db_path=db_path)
         self._resolver = WorkspaceResolver(workspace_root)
         self._delivery_max_attempts = max(1, delivery_max_attempts)

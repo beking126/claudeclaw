@@ -36,3 +36,10 @@ def test_heartbeat_loads_source_text_from_heartbeat_file(tmp_path: Path):
 
     text = service.load_source_text()
     assert text == "ship release\n"
+
+
+def test_heartbeat_service_init_docstring_documents_store_dependency_injection():
+    from claudebot_gateway.heartbeat_service import HeartbeatService
+
+    doc = HeartbeatService.__init__.__doc__ or ""
+    assert "store (SqliteStore | None)" in doc

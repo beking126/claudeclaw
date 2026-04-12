@@ -162,3 +162,10 @@ def test_cron_delivery_retries_and_recovers_from_transient_failure(tmp_path: Pat
     assert result["run_status"] == "ok"
     assert delivery is not None
     assert delivery["status"] == "ok"
+
+
+def test_cron_service_init_docstring_documents_store_dependency_injection():
+    from claudebot_gateway.cron_service import CronService
+
+    doc = CronService.__init__.__doc__ or ""
+    assert "store (SqliteStore | None)" in doc
