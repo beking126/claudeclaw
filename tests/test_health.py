@@ -90,3 +90,32 @@ def test_health_snapshot_includes_channel_status(tmp_path):
     assert isinstance(channels, dict)
     assert "cli" in channels
     assert channels["cli"]["state"] == "stopped"
+
+
+def test_http_metrics_returns_runtime_counters():
+    from claudebot_gateway.health import HealthService
+    from claudebot_gateway.runtime import GatewayRuntime
+
+    async def _run() -> tuple[int, dict[str, object]]:
+        runtime = GatewayRuntime(workers=[])
+        await runtime.start()
+        service = HealthService(
+            runtime=runtime,
+            http_enabled=True,
+            host="127.0.0.1",
+            port=0,
+        )
+        await service.start_http_if_enabled()
+        assert service._bound_port is not None
+        status, payload = await _http_get_json("127.0.0.1", service._bound_port, "/metrics")
+        await service.stop_http_if_started()
+        await runtime.stop()
+        return status, payload
+
+    status, payload = asyncio.run(_run())
+    assert status == 200
+    assert "unhandled_errors" in payload
+    assert "inbound_queue_depth" in payload
+    assert "outbound_queue_depth" in payload
+    assert "due_cron_jobs" in payload
+    assert payload["unhandled_errors"] == 0

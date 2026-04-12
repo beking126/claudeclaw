@@ -380,7 +380,9 @@ class GatewayApp:
 
     async def _heartbeat_worker(self, stop_event: asyncio.Event) -> None:
         interval = max(1, self._config.heartbeat_interval_seconds)
+        retention = max(1, self._config.agent_turns_retention_days)
         while not stop_event.is_set():
+            self._store.purge_old_turns(max_age_days=retention)
             source_text = self._heartbeat.load_source_text()
             await self._heartbeat.run_once(source_text=source_text, agent_func=self._heartbeat_agent)
             try:

@@ -90,6 +90,7 @@ class GatewayConfig:
     health_http: HealthHttpConfig = field(default_factory=HealthHttpConfig)
     heartbeat_interval_seconds: int = 300
     sqlite_path: Path = Path("state/gateway.db")
+    agent_turns_retention_days: int = 90
 
 
 def load_gateway_config(

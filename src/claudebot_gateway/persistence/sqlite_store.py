@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -482,3 +483,12 @@ class SqliteStore:
             (session_id,),
         ).fetchall()
         return [self._row_to_agent_turn(row) for row in rows]
+
+    def purge_old_turns(self, *, max_age_days: int) -> int:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+        cursor = self._conn.execute(
+            "DELETE FROM agent_turns WHERE created_at < ?",
+            (cutoff,),
+        )
+        self._conn.commit()
+        return cursor.rowcount

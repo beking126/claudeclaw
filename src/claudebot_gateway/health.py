@@ -78,6 +78,9 @@ class HealthService:
             if path in ("/health", "/healthz"):
                 status_code = 200
                 payload = self.snapshot()
+            elif path == "/metrics":
+                status_code = 200
+                payload = self._metrics_snapshot()
             elif path in ("/ready", "/readyz"):
                 ready = self._is_ready()
                 status_code = 200 if ready else 503
@@ -106,3 +109,14 @@ class HealthService:
         if not isinstance(running, bool):
             return False
         return running
+
+    def _metrics_snapshot(self) -> dict[str, object]:
+        signals = {} if self._signal_provider is None else self._signal_provider()
+        runtime = self._runtime.health_snapshot()
+        return {
+            "unhandled_errors": runtime.get("unhandled_errors", 0),
+            "active_tasks": runtime.get("active_tasks", 0),
+            "inbound_queue_depth": signals.get("inbound_queue_depth", 0),
+            "outbound_queue_depth": signals.get("outbound_queue_depth", 0),
+            "due_cron_jobs": signals.get("due_cron_jobs", 0),
+        }
