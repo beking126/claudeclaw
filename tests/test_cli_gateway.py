@@ -425,3 +425,86 @@ def test_log_format_text_is_default(tmp_path: Path, capsys):
         "--db-path", str(tmp_path / "state" / "gateway.db"),
     ])
     assert exit_code == 0
+
+
+def _channels_argv(tmp_path: Path, action_args: list[str]) -> list[str]:
+    return [
+        "channels",
+        *action_args,
+        "--workspace-root", str(tmp_path / "workspaces"),
+        "--db-path", str(tmp_path / "state" / "gateway.db"),
+    ]
+
+
+def test_channels_status_shows_default_config(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main(_channels_argv(tmp_path, ["status"]))
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "cli" in output
+    assert "enabled" in output
+    assert "telegram" in output
+    assert "disabled" in output
+
+
+def test_channels_status_with_enabled_channels(tmp_path: Path, capsys, monkeypatch):
+    from claudebot_gateway.cli import main
+
+    config_dir = tmp_path / ".claudebot"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.json").write_text(json.dumps({
+        "channels": {
+            "telegram": {"enabled": True, "bot_token": "tg-test-token"},
+            "feishu": {"enabled": True, "app_id": "fei-app", "app_secret": "s"},
+        },
+    }), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = main(_channels_argv(tmp_path, ["status"]))
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "telegram" in output
+    assert "enabled" in output
+    assert "token=set" in output
+    assert "feishu" in output
+    assert "app_id=set" in output
+
+
+def test_channels_status_with_live_gateway(tmp_path: Path, capsys, monkeypatch):
+    from claudebot_gateway.cli import main
+
+    config_dir = tmp_path / ".claudebot"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    def _fake_urlopen(req, timeout=2):
+        body = json.dumps({
+            "runtime": {"started": True, "running": True, "stopped": False, "worker_count": 4, "unhandled_errors": 0},
+            "signals": {
+                "channels": {
+                    "cli": {"state": "running", "last_error": None, "reconnect_attempts": 0},
+                    "telegram": {"state": "degraded", "last_error": "connection refused", "reconnect_attempts": 3},
+                },
+            },
+        }).encode("utf-8")
+
+        class _FakeResp:
+            status = 200
+            def read(self):
+                return body
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                pass
+        return _FakeResp()
+
+    monkeypatch.setattr("claudebot_gateway.cli.urlopen", _fake_urlopen)
+
+    exit_code = main(_channels_argv(tmp_path, ["status"]))
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "running" in output
+    assert "degraded" in output
+    assert "err=connection refused" in output

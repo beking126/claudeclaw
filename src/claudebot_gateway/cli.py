@@ -135,6 +135,50 @@ def _cron_job_line(job: dict[str, object]) -> str:
     return f"{job_id}  {schedule}  {channel}/{destination}  next={dt.strftime('%Y-%m-%d %H:%M UTC')}"
 
 
+def _channels_status_text(config: GatewayConfig, live_channels: dict[str, object] | None = None) -> str:
+    channel_configs: list[tuple[str, bool, str]] = [
+        ("cli", config.channels.cli.enabled, ""),
+        ("telegram", config.channels.telegram.enabled, f"token={'set' if config.channels.telegram.bot_token else 'missing'}"),
+        ("discord", config.channels.discord.enabled, ""),
+        ("feishu", config.channels.feishu.enabled, f"app_id={'set' if config.channels.feishu.app_id else 'missing'}"),
+        ("whatsapp", config.channels.whatsapp.enabled, ""),
+        ("slack", config.channels.slack.enabled, ""),
+    ]
+    live = live_channels if isinstance(live_channels, dict) else {}
+    lines: list[str] = []
+    for name, enabled, config_info in channel_configs:
+        status_parts: list[str] = []
+        if enabled:
+            status_parts.append("enabled")
+        else:
+            status_parts.append("disabled")
+        chan_live = live.get(name)
+        if isinstance(chan_live, dict):
+            status_parts.append(str(chan_live.get("state", "unknown")))
+            last_error = chan_live.get("last_error")
+            if last_error:
+                status_parts.append(f"err={last_error}")
+        if config_info:
+            status_parts.append(config_info)
+        lines.append(f"  {name:10s} {' '.join(status_parts)}")
+    return "channels:\n" + "\n".join(lines)
+
+
+def _handle_channels_status(args: argparse.Namespace) -> int:
+    config = load_gateway_config(
+        workspace_root=Path(args.workspace_root) if args.workspace_root else None,
+        sqlite_path=Path(args.db_path) if args.db_path else None,
+    )
+    live_snapshot = _fetch_live_status(config.health_http.host, config.health_http.port)
+    live_channels = None
+    if live_snapshot is not None:
+        signals = live_snapshot.get("signals")
+        if isinstance(signals, dict):
+            live_channels = signals.get("channels")
+    print(_channels_status_text(config, live_channels))
+    return 0
+
+
 def _handle_cron_add(args: argparse.Namespace) -> int:
     from claudebot_gateway.persistence.sqlite_store import SqliteStore
 
@@ -333,6 +377,13 @@ def main(argv: list[str] | None = None) -> int:
     validate.add_argument("--workspace-root", default=None)
     validate.add_argument("--db-path", default=None)
 
+    channels = subparsers.add_parser("channels")
+    channels_sub = channels.add_subparsers(dest="channels_action", required=True)
+
+    channels_status = channels_sub.add_parser("status")
+    channels_status.add_argument("--workspace-root", default=None)
+    channels_status.add_argument("--db-path", default=None)
+
     args = parser.parse_args(argv)
     _configure_logging(args.verbose, log_format=args.log_format)
     _LOGGER.debug("verbose_mode_enabled=true")
@@ -410,5 +461,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "validate":
         return _handle_validate(args)
+
+    if args.command == "channels":
+        if args.channels_action == "status":
+            return _handle_channels_status(args)
 
     return 2
