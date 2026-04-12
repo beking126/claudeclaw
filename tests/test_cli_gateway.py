@@ -233,6 +233,39 @@ def test_cron_add_at_job(tmp_path: Path, capsys):
     assert "scheduled" in capsys.readouterr().out
 
 
+def test_cron_add_at_job_with_iso_datetime(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main(_cron_argv(tmp_path, [
+        "add", "--prompt", "iso one-shot", "--channel", "cli",
+        "--destination", "cli:stdout", "--at", "2026-04-12T15:30",
+    ]))
+    assert exit_code == 0
+    assert "scheduled" in capsys.readouterr().out
+
+
+def test_cron_add_at_job_with_space_datetime(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main(_cron_argv(tmp_path, [
+        "add", "--prompt", "space one-shot", "--channel", "cli",
+        "--destination", "cli:stdout", "--at", "2026-04-12 15:30",
+    ]))
+    assert exit_code == 0
+    assert "scheduled" in capsys.readouterr().out
+
+
+def test_cron_add_at_invalid_format(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main(_cron_argv(tmp_path, [
+        "add", "--prompt", "bad time", "--channel", "cli",
+        "--destination", "cli:stdout", "--at", "not-a-time",
+    ]))
+    assert exit_code == 1
+    assert "Cannot parse" in capsys.readouterr().err
+
+
 def test_cron_add_cron_expression_job(tmp_path: Path, capsys):
     from claudebot_gateway.cli import main
 

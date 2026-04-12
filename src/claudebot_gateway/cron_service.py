@@ -196,11 +196,20 @@ class CronService:
         token = field.strip()
         if token == "*":
             return True
+        if "," in token:
+            return any(self._matches_field(part, value, minimum, maximum) for part in token.split(","))
         if token.startswith("*/"):
             step = int(token[2:])
             if step <= 0:
                 raise ValueError("Cron step must be greater than zero")
             return value % step == 0
+        if "-" in token:
+            parts = token.split("-", 1)
+            lo = int(parts[0])
+            hi = int(parts[1])
+            if lo < minimum or hi > maximum:
+                raise ValueError(f"Cron range {token} out of bounds {minimum}-{maximum}")
+            return lo <= value <= hi
         target = int(token)
         if target < minimum or target > maximum:
             raise ValueError(f"Cron value {target} out of range {minimum}-{maximum}")

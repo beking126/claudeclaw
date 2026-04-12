@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -169,3 +170,57 @@ def test_cron_service_init_docstring_documents_store_dependency_injection():
 
     doc = CronService.__init__.__doc__ or ""
     assert "store (SqliteStore | None)" in doc
+
+
+def test_cron_expression_range_matches_values_within_range():
+    from claudebot_gateway.cron_service import CronService
+
+    service = CronService(db_path=Path("dummy.db"), workspace_root=Path("ws"))
+    assert service._matches_field("1-5", 1, 0, 59) is True
+    assert service._matches_field("1-5", 3, 0, 59) is True
+    assert service._matches_field("1-5", 5, 0, 59) is True
+    assert service._matches_field("1-5", 0, 0, 59) is False
+    assert service._matches_field("1-5", 6, 0, 59) is False
+
+
+def test_cron_expression_list_matches_exact_values():
+    from claudebot_gateway.cron_service import CronService
+
+    service = CronService(db_path=Path("dummy.db"), workspace_root=Path("ws"))
+    assert service._matches_field("1,15,30", 1, 0, 59) is True
+    assert service._matches_field("1,15,30", 15, 0, 59) is True
+    assert service._matches_field("1,15,30", 30, 0, 59) is True
+    assert service._matches_field("1,15,30", 10, 0, 59) is False
+    assert service._matches_field("1,15,30", 0, 0, 59) is False
+
+
+def test_cron_expression_range_out_of_bounds_raises():
+    from claudebot_gateway.cron_service import CronService
+
+    service = CronService(db_path=Path("dummy.db"), workspace_root=Path("ws"))
+    import pytest
+    with pytest.raises(ValueError, match="out of bounds"):
+        service._matches_field("0-25", 5, 0, 23)
+
+
+def test_cron_next_run_with_range_expression(tmp_path: Path):
+    from claudebot_gateway.cron_service import CronService
+
+    async def _run() -> float:
+        service = CronService(db_path=tmp_path / "gateway.db", workspace_root=tmp_path / "ws")
+        await service.schedule_job(
+            job_id="range-job",
+            prompt="range test",
+            target={"channel": "cli", "destination": "cli:stdout"},
+            schedule_kind="cron",
+            schedule_value="0 9-11 * * *",
+            run_at_epoch_seconds=0.0,
+        )
+        jobs = service._store.list_due_cron_jobs(now_epoch_seconds=1.0)
+        assert len(jobs) == 1
+        return service._next_cron_epoch_seconds("0 9-11 * * *", from_epoch_seconds=1.0)
+
+    result = asyncio.run(_run())
+    dt = datetime.fromtimestamp(result, tz=timezone.utc)
+    assert dt.hour in {9, 10, 11}
+    assert dt.minute == 0

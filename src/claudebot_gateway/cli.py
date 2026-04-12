@@ -101,6 +101,21 @@ def _cron_schedule_label(job: dict[str, object]) -> str:
     return kind
 
 
+def _parse_at_time(raw: str) -> float:
+    """Parse --at value as either an ISO datetime or an epoch float."""
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+        try:
+            dt = datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except ValueError:
+            continue
+    raise ValueError(f"Cannot parse --at time: {raw!r}. Use epoch float or ISO format like '2026-04-12T15:30'")
+
+
 def _cron_job_line(job: dict[str, object]) -> str:
     job_id = str(job.get("job_id", ""))
     channel = str(job.get("channel", ""))
@@ -146,7 +161,11 @@ def _handle_cron_add(args: argparse.Namespace) -> int:
             next_run_epoch_seconds=now,
         )
     elif args.at is not None:
-        run_at = float(args.at)
+        try:
+            run_at = _parse_at_time(args.at)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
         store.upsert_cron_job(
             job_id=job_id,
             prompt=args.prompt,
@@ -286,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     cron_add.add_argument("--channel", required=True)
     cron_add.add_argument("--destination", required=True)
     cron_add.add_argument("--every", type=int, default=None)
-    cron_add.add_argument("--at", type=float, default=None)
+    cron_add.add_argument("--at", type=str, default=None)
     cron_add.add_argument("--cron", default=None)
     cron_add.add_argument("--job-id", default=None)
     cron_add.add_argument("--workspace-root", default=None)
