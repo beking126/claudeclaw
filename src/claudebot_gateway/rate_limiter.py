@@ -11,6 +11,10 @@ class SlidingWindowRateLimiter:
     def is_allowed(self, key: str, *, now: float) -> bool:
         if self._max_requests <= 0:
             return True
+        if len(self._buckets) > 1000:
+            expired = [k for k, (ws, _) in self._buckets.items() if now - ws >= self._window_seconds]
+            for k in expired:
+                del self._buckets[k]
         window_start, count = self._buckets.get(key, (0.0, 0))
         if now - window_start >= self._window_seconds:
             window_start = now

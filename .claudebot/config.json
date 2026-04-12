@@ -44,5 +44,10 @@
       "session_persistence_enabled": true,
       "session_scope": "workspace_channel_destination"
     }
+  },
+  "health_http": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8787
   }
 }

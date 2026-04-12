@@ -29,12 +29,9 @@ def load_workspace_prompt_files(workspace: Path) -> dict[str, str]:
     loaded: dict[str, str] = {}
     for filename in _PROMPT_FILES:
         file_path = workspace_path / filename
-        if not file_path.exists():
-            loaded[filename] = ""
-            continue
         try:
             loaded[filename] = file_path.read_text(encoding="utf-8")
-        except Exception:
+        except (FileNotFoundError, OSError):
             loaded[filename] = ""
     return loaded
 

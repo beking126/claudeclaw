@@ -4,7 +4,7 @@ import time
 from typing import Any, Awaitable, Callable
 from datetime import datetime, timezone
 
-from claudebot_gateway.persistence.sqlite_store import SqliteStore
+from claudebot_gateway.persistence.sqlite_store import SqliteStore, coerce_to_str_dict
 from claudebot_gateway.workspaces import WorkspaceResolver
 
 
@@ -168,7 +168,7 @@ class CronService:
         delivery = self._store.get_last_delivery_by_job(job_id)
         if delivery is None:
             return None
-        return {k: "" if v is None else str(v) for k, v in delivery.items()}
+        return coerce_to_str_dict(delivery)
 
     def _next_cron_epoch_seconds(self, expression: str, *, from_epoch_seconds: float) -> float:
         fields = expression.strip().split()

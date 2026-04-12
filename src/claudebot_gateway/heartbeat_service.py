@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from claudebot_gateway.persistence.sqlite_store import SqliteStore
+from claudebot_gateway.persistence.sqlite_store import SqliteStore, coerce_to_str_dict
 from claudebot_gateway.workspaces import WorkspaceResolver
 
 
@@ -53,4 +53,4 @@ class HeartbeatService:
         run = self._store.get_last_heartbeat_run()
         if run is None:
             return None
-        return {k: "" if v is None else str(v) for k, v in run.items()}
+        return coerce_to_str_dict(run)

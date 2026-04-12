@@ -216,18 +216,18 @@ def test_gateway_app_wires_enabled_extended_channels(tmp_path: Path):
             ),
         )
     )
-    assert "cli" in app._adapters
-    assert "telegram" in app._adapters
-    assert "discord" in app._adapters
-    assert "feishu" in app._adapters
-    assert "whatsapp" in app._adapters
-    assert "slack" in app._adapters
-    telegram = app._adapters["telegram"]
+    assert "cli" in app._channels
+    assert "telegram" in app._channels
+    assert "discord" in app._channels
+    assert "feishu" in app._channels
+    assert "whatsapp" in app._channels
+    assert "slack" in app._channels
+    telegram = app._channels["telegram"]
     assert telegram._token == "tg-token"
     assert telegram._send_max_attempts == 7
     assert telegram._base_backoff_seconds == 0.25
     assert telegram._max_backoff_seconds == 3.0
-    feishu = app._adapters["feishu"]
+    feishu = app._channels["feishu"]
     assert feishu._app_id == "fei-app"
     assert feishu._app_secret == "fei-secret"
     assert feishu._verify_token == "verify-me"
@@ -252,11 +252,10 @@ def test_gateway_app_builders_preserve_enabled_channels_and_allowed_senders(tmp_
             slack=ChannelToggle(enabled=True, allowed_senders=[]),
         ),
     )
-    adapters, channels = GatewayApp._build_channels(config=config, bus=MessageBus())
+    adapters = GatewayApp._build_channels(config=config, bus=MessageBus())
     allowed = GatewayApp._build_allowed_senders(config)
 
     assert set(adapters.keys()) == {"cli", "telegram", "feishu", "slack"}
-    assert set(channels.keys()) == {"cli", "telegram", "feishu", "slack"}
     assert allowed == {
         "cli": {"cli-user"},
         "telegram": {"tg-user"},

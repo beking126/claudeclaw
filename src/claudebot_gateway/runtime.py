@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from collections.abc import Coroutine
-from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,7 +13,7 @@ from claudebot_gateway.channels.feishu import FeishuChannel
 from claudebot_gateway.channels.slack import SlackBridgeChannel
 from claudebot_gateway.channels.telegram import TelegramChannel
 from claudebot_gateway.channels.whatsapp import WhatsAppBridgeChannel
-from claudebot_gateway.config import GatewayConfig
+from claudebot_gateway.config import CHANNEL_NAMES, GatewayConfig
 from claudebot_gateway.cron_service import CronService
 from claudebot_gateway.health import HealthService
 from claudebot_gateway.heartbeat_service import HeartbeatService
@@ -111,7 +110,7 @@ class SessionContextRuntime:
         self._session_persistence_enabled = session_persistence_enabled
 
     async def execute(self, request: AgentExecutionRequest) -> Any:
-        request_metadata = deepcopy(request.metadata) if isinstance(request.metadata, dict) else {}
+        request_metadata = dict(request.metadata) if isinstance(request.metadata, dict) else {}
         workspace_path = str(request.workspace)
         channel = request.channel
         destination = request.destination
@@ -185,8 +184,8 @@ class GatewayApp:
             inbound_maxsize=config.message_bus.inbound_maxsize,
             outbound_maxsize=config.message_bus.outbound_maxsize,
         )
-        self._adapters, channels = self._build_channels(config=config, bus=self._bus)
-        self._channel_manager = ChannelManager(channels=channels)
+        self._channels = self._build_channels(config=config, bus=self._bus)
+        self._channel_manager = ChannelManager(channels=self._channels)
         channel_allowed_senders = self._build_allowed_senders(config)
         (
             self._agent_runner,
@@ -201,29 +200,19 @@ class GatewayApp:
         )
 
     @staticmethod
-    def _build_channels(*, config: GatewayConfig, bus: MessageBus) -> tuple[dict[str, Any], dict[str, Any]]:
-        adapters: dict[str, Any] = {}
+    def _build_channels(*, config: GatewayConfig, bus: MessageBus) -> dict[str, Any]:
         channels: dict[str, Any] = {}
-        if config.channels.cli.enabled:
-            cli = CliChannel()
-            adapters["cli"] = cli
-            channels["cli"] = cli
-        if config.channels.telegram.enabled:
-            telegram = TelegramChannel(
+        builders: dict[str, Callable[[], Any]] = {
+            "cli": lambda: CliChannel(),
+            "telegram": lambda: TelegramChannel(
                 bus=bus,
                 token=config.channels.telegram.bot_token,
                 send_max_attempts=config.channels.telegram.send_max_attempts,
                 base_backoff_seconds=config.channels.telegram.base_backoff_seconds,
                 max_backoff_seconds=config.channels.telegram.max_backoff_seconds,
-            )
-            adapters["telegram"] = telegram
-            channels["telegram"] = telegram
-        if config.channels.discord.enabled:
-            discord = DiscordChannel()
-            adapters["discord"] = discord
-            channels["discord"] = discord
-        if config.channels.feishu.enabled:
-            feishu = FeishuChannel(
+            ),
+            "discord": lambda: DiscordChannel(),
+            "feishu": lambda: FeishuChannel(
                 bus=bus,
                 app_id=config.channels.feishu.app_id,
                 app_secret=config.channels.feishu.app_secret,
@@ -232,34 +221,26 @@ class GatewayApp:
                 send_max_attempts=config.channels.feishu.send_max_attempts,
                 base_backoff_seconds=config.channels.feishu.base_backoff_seconds,
                 max_backoff_seconds=config.channels.feishu.max_backoff_seconds,
-            )
-            adapters["feishu"] = feishu
-            channels["feishu"] = feishu
-        if config.channels.whatsapp.enabled:
-            whatsapp = WhatsAppBridgeChannel()
-            adapters["whatsapp"] = whatsapp
-            channels["whatsapp"] = whatsapp
-        if config.channels.slack.enabled:
-            slack = SlackBridgeChannel()
-            adapters["slack"] = slack
-            channels["slack"] = slack
-        return adapters, channels
+            ),
+            "whatsapp": lambda: WhatsAppBridgeChannel(),
+            "slack": lambda: SlackBridgeChannel(),
+        }
+        for name in CHANNEL_NAMES:
+            toggle = getattr(config.channels, name, None)
+            if toggle is not None and toggle.enabled and name in builders:
+                channels[name] = builders[name]()
+        return channels
 
     @staticmethod
     def _build_allowed_senders(config: GatewayConfig) -> dict[str, set[str]]:
         channel_senders: dict[str, set[str]] = {}
-        channel_entries = [
-            ("cli", config.channels.cli.allowed_senders),
-            ("telegram", config.channels.telegram.allowed_senders),
-            ("discord", config.channels.discord.allowed_senders),
-            ("feishu", config.channels.feishu.allowed_senders),
-            ("whatsapp", config.channels.whatsapp.allowed_senders),
-            ("slack", config.channels.slack.allowed_senders),
-        ]
-        for channel_name, allowed_senders in channel_entries:
-            allowed = {sender for sender in allowed_senders if sender}
+        for name in CHANNEL_NAMES:
+            toggle = getattr(config.channels, name, None)
+            if toggle is None:
+                continue
+            allowed = {sender for sender in toggle.allowed_senders if sender}
             if allowed:
-                channel_senders[channel_name] = allowed
+                channel_senders[name] = allowed
         return channel_senders
 
     def _build_services(
@@ -281,7 +262,7 @@ class GatewayApp:
             channel_allowed_senders=channel_allowed_senders,
             rate_limiter=rate_limiter,
         )
-        dispatcher = OutboundDispatcher(adapters=self._adapters)
+        dispatcher = OutboundDispatcher(adapters=self._channels)
         cron = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root, store=self._store)
         heartbeat = HeartbeatService(db_path=config.sqlite_path, workspace_root=config.workspace_root, store=self._store)
         runtime = GatewayRuntime(
@@ -301,9 +282,6 @@ class GatewayApp:
             signal_provider=self._health_signals,
         )
         return agent_runner, dispatcher, cron, heartbeat, runtime, health
-
-    def _channel_allowed_senders(self, config: GatewayConfig) -> dict[str, set[str]]:
-        return self._build_allowed_senders(config)
 
     async def run_once(self, demo_text: str = "") -> None:
         await self._channel_manager.start_all()
@@ -360,31 +338,34 @@ class GatewayApp:
             "channels": self._channel_manager.status_snapshot(),
         }
 
-    async def _agent_worker(self, stop_event: asyncio.Event) -> None:
+    async def _bus_draining_worker(
+        self,
+        stop_event: asyncio.Event,
+        queue: asyncio.Queue[Any],
+        processor: Any,
+        error_label: str,
+    ) -> None:
         while not stop_event.is_set():
-            if self._bus.inbound.empty():
+            if queue.empty():
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=0.05)
                 except TimeoutError:
                     continue
                 continue
             try:
-                await self._agent_runner.process_once(self._bus)
+                await processor(self._bus)
             except Exception:
-                _LOGGER.exception("agent_worker_process_failed")
+                _LOGGER.exception("%s", error_label)
+
+    async def _agent_worker(self, stop_event: asyncio.Event) -> None:
+        await self._bus_draining_worker(
+            stop_event, self._bus.inbound, self._agent_runner.process_once, "agent_worker_process_failed"
+        )
 
     async def _dispatch_worker(self, stop_event: asyncio.Event) -> None:
-        while not stop_event.is_set():
-            if self._bus.outbound.empty():
-                try:
-                    await asyncio.wait_for(stop_event.wait(), timeout=0.05)
-                except TimeoutError:
-                    continue
-                continue
-            try:
-                await self._dispatcher.dispatch_once(self._bus)
-            except Exception:
-                _LOGGER.exception("dispatch_worker_process_failed")
+        await self._bus_draining_worker(
+            stop_event, self._bus.outbound, self._dispatcher.dispatch_once, "dispatch_worker_process_failed"
+        )
 
     async def _heartbeat_worker(self, stop_event: asyncio.Event) -> None:
         interval = max(1, self._config.heartbeat_interval_seconds)

@@ -28,20 +28,20 @@ class FeishuChannel(BaseChannel):
         max_backoff_seconds: float = 8.0,
         sdk_loader: Any = None,
     ):
-        super().__init__()
+        super().__init__(
+            send_max_attempts=send_max_attempts,
+            base_backoff_seconds=base_backoff_seconds,
+            max_backoff_seconds=max_backoff_seconds,
+        )
         self._bus = bus
         self._app_id = app_id
         self._app_secret = app_secret
         self._verify_token = verify_token
         self._encrypt_key = encrypt_key
-        self._send_max_attempts = max(1, send_max_attempts)
-        self._base_backoff_seconds = max(0.0, base_backoff_seconds)
-        self._max_backoff_seconds = max(self._base_backoff_seconds, max_backoff_seconds)
         self._sdk_loader = sdk_loader or self._load_sdk
-        self._running = False
-        self._last_error: str | None = None
+        self._send_sdk: dict[str, Any] | None = None
         self._reconnect_attempts = 0
-        self._seen_event_ids: set[str] = set()
+        self._seen_event_ids: OrderedDict[str, None] = OrderedDict()
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
         self._client: Any = None
         self._ws_client: Any = None
@@ -128,7 +128,9 @@ class FeishuChannel(BaseChannel):
         if event_id and event_id in self._seen_event_ids:
             return False
         if event_id:
-            self._seen_event_ids.add(event_id)
+            self._seen_event_ids[event_id] = None
+            while len(self._seen_event_ids) > 1000:
+                self._seen_event_ids.popitem(last=False)
         await self.process_raw_message(payload)
         return True
 
@@ -160,34 +162,6 @@ class FeishuChannel(BaseChannel):
             inbound["metadata"] = {"event_id": event_id_raw}
         await self._bus.publish_inbound(inbound)
         self._last_error = None
-
-    async def send(self, message: dict[str, str]) -> None:
-        if not self._running:
-            raise RuntimeError("feishu channel is not running")
-        last_exception: Exception | None = None
-        for attempt in range(1, self._send_max_attempts + 1):
-            try:
-                await self._send_message(message)
-                self._last_error = None
-                return
-            except Exception as exc:
-                last_exception = exc
-                self._last_error = str(exc)
-                if attempt == self._send_max_attempts:
-                    break
-                backoff = self._next_backoff_seconds(attempt)
-                _LOGGER.warning(
-                    "feishu_send_retry attempt=%s retry_in=%s error=%s",
-                    attempt,
-                    f"{backoff:.2f}s",
-                    self._last_error,
-                )
-                if backoff > 0:
-                    await asyncio.sleep(backoff)
-        self._reconnect_attempts += 1
-        if last_exception is None:
-            raise RuntimeError("feishu send failed without exception")
-        raise last_exception
 
     def health(self) -> dict[str, object]:
         return {
@@ -223,7 +197,9 @@ class FeishuChannel(BaseChannel):
             self._processed_message_ids[message_id] = None
             while len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
-            self._seen_event_ids.add(message_id)
+            self._seen_event_ids[message_id] = None
+            while len(self._seen_event_ids) > 1000:
+                self._seen_event_ids.popitem(last=False)
         sender_type = getattr(sender, "sender_type", "")
         if sender_type == "bot":
             return
@@ -279,16 +255,17 @@ class FeishuChannel(BaseChannel):
             return True
         return signature == "ok" or signature == self._verify_token
 
-    def _next_backoff_seconds(self, attempt: int) -> float:
-        delay = self._base_backoff_seconds * (2 ** max(0, attempt - 1))
-        return min(delay, self._max_backoff_seconds)
-
     async def _send_message(self, message: dict[str, str]) -> None:
         if self._client is None:
             raise RuntimeError("feishu client not initialized")
-        sdk = self._sdk_loader()
-        create_message_request_cls = sdk["CreateMessageRequest"]
-        create_message_request_body_cls = sdk["CreateMessageRequestBody"]
+        if self._send_sdk is None:
+            sdk = self._sdk_loader()
+            self._send_sdk = {
+                "CreateMessageRequest": sdk["CreateMessageRequest"],
+                "CreateMessageRequestBody": sdk["CreateMessageRequestBody"],
+            }
+        create_message_request_cls = self._send_sdk["CreateMessageRequest"]
+        create_message_request_body_cls = self._send_sdk["CreateMessageRequestBody"]
         destination = message.get("destination", "")
         receive_id_type = "chat_id" if destination.startswith("oc_") else "open_id"
         content = json.dumps({"text": message.get("text", "")})

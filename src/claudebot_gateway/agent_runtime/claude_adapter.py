@@ -43,6 +43,9 @@ class ClaudeSdkAdapter:
     def __init__(self, options: ClaudeRuntimeOptions, query_callable: QueryCallable | None = None):
         self._options = options
         self._query_callable = query_callable
+        self._cached_query_callable: QueryCallable | None = None
+        self._cached_claude_options_cls: Any = None
+        self._sdk_resolved = False
 
     async def execute(self, request: AgentExecutionRequest) -> AgentExecutionResult:
         query_callable = self._query_callable or self._resolve_query_callable()
@@ -83,6 +86,8 @@ class ClaudeSdkAdapter:
             raise AgentRuntimeExecutionError("Claude runtime execution failed. Check runtime logs for details.") from exc
 
     def _resolve_query_callable(self) -> QueryCallable:
+        if self._cached_query_callable is not None:
+            return self._cached_query_callable
         try:
             sdk_module = import_module("claude_agent_sdk")
         except ImportError as exc:
@@ -92,6 +97,7 @@ class ClaudeSdkAdapter:
         query_callable = getattr(sdk_module, "query", None)
         if not callable(query_callable):
             raise AgentRuntimeExecutionError("claude-agent-sdk.query is not available.")
+        self._cached_query_callable = query_callable
         return query_callable
 
     def _build_sdk_options(self, workspace: Any, *, resume_override: str | None = None) -> Any:
@@ -112,14 +118,16 @@ class ClaudeSdkAdapter:
         options_payload.pop("session_scope", None)
         if options_payload.pop("restrict_to_workspace", False):
             options_payload["can_use_tool"] = _make_workspace_guard(workspace)
-        try:
-            sdk_module = import_module("claude_agent_sdk")
-        except ImportError:
+        if not self._sdk_resolved:
+            try:
+                sdk_module = import_module("claude_agent_sdk")
+                self._cached_claude_options_cls = getattr(sdk_module, "ClaudeAgentOptions", None)
+            except ImportError:
+                self._cached_claude_options_cls = None
+            self._sdk_resolved = True
+        if self._cached_claude_options_cls is None:
             return options_payload
-        claude_options = getattr(sdk_module, "ClaudeAgentOptions", None)
-        if claude_options is None:
-            return options_payload
-        return claude_options(**options_payload)
+        return self._cached_claude_options_cls(**options_payload)
 
     def _extract_text(self, message: Any) -> str:
         if isinstance(message, dict):

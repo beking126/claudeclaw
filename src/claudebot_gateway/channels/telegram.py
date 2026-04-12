@@ -1,4 +1,3 @@
-import asyncio
 import importlib
 import logging
 import os
@@ -24,15 +23,14 @@ class TelegramChannel(BaseChannel):
         send_max_attempts: int = 3,
         sdk_loader: Callable[[], dict[str, Any]] | None = None,
     ):
-        super().__init__()
+        super().__init__(
+            send_max_attempts=send_max_attempts,
+            base_backoff_seconds=base_backoff_seconds,
+            max_backoff_seconds=max_backoff_seconds,
+        )
         self._bus = bus
         self._token = token or os.getenv("CLAUDEBOT_TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
-        self._base_backoff_seconds = max(0.0, base_backoff_seconds)
-        self._max_backoff_seconds = max(self._base_backoff_seconds, max_backoff_seconds)
-        self._send_max_attempts = max(1, send_max_attempts)
         self._sdk_loader = sdk_loader or self._load_sdk
-        self._running = False
-        self._last_error: str | None = None
         self._reconnect_attempts = 0
         self._app: Any = None
         self._chat_ids: dict[str, int] = {}
@@ -98,33 +96,6 @@ class TelegramChannel(BaseChannel):
         await self._bus.publish_inbound(inbound)
         self._last_error = None
 
-    async def send(self, message: dict[str, str]) -> None:
-        if not self._running:
-            raise RuntimeError("telegram channel is not running")
-        last_exception: Exception | None = None
-        for attempt in range(1, self._send_max_attempts + 1):
-            try:
-                await self._send_message(message)
-                self._last_error = None
-                return
-            except Exception as exc:
-                last_exception = exc
-                self._last_error = str(exc)
-                if attempt == self._send_max_attempts:
-                    break
-                backoff = self._next_backoff_seconds(attempt)
-                _LOGGER.warning(
-                    "telegram_send_retry attempt=%s retry_in=%s error=%s",
-                    attempt,
-                    f"{backoff:.2f}s",
-                    self._last_error,
-                )
-                if backoff > 0:
-                    await asyncio.sleep(backoff)
-        if last_exception is None:
-            raise RuntimeError("telegram send failed without exception")
-        raise last_exception
-
     def health(self) -> dict[str, object]:
         return {
             "running": self._running,
@@ -132,10 +103,6 @@ class TelegramChannel(BaseChannel):
             "reconnect_attempts": self._reconnect_attempts,
             "connected": self._app is not None,
         }
-
-    def _next_backoff_seconds(self, attempt: int) -> float:
-        delay = self._base_backoff_seconds * (2 ** max(0, attempt - 1))
-        return min(delay, self._max_backoff_seconds)
 
     async def _send_message(self, message: dict[str, str]) -> None:
         if self._app is None:

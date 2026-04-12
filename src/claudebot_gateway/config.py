@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+CHANNEL_NAMES = ("cli", "telegram", "discord", "feishu", "whatsapp", "slack")
+
 
 @dataclass(slots=True)
 class ClaudeRuntimeOptions:
@@ -147,6 +149,17 @@ def load_gateway_config(
         window_seconds = rate_limit_raw.get("window_seconds")
         if isinstance(window_seconds, (int, float)):
             config.rate_limit_window_seconds = float(window_seconds)
+    health_http_raw = raw.get("health_http")
+    if isinstance(health_http_raw, dict):
+        enabled = health_http_raw.get("enabled")
+        if isinstance(enabled, bool):
+            config.health_http.enabled = enabled
+        host = health_http_raw.get("host")
+        if isinstance(host, str) and host:
+            config.health_http.host = host
+        port = health_http_raw.get("port")
+        if isinstance(port, int):
+            config.health_http.port = port
     return config
 
 

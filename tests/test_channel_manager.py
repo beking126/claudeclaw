@@ -1,7 +1,9 @@
 import asyncio
 
+from claudebot_gateway.channels.base import BaseChannel
 
-class _HealthyChannel:
+
+class _HealthyChannel(BaseChannel):
     async def start(self) -> None:
         return None
 
@@ -27,7 +29,7 @@ def test_channel_start_failure_does_not_stop_manager():
     from claudebot_gateway.channel_manager import ChannelManager
 
     async def _run() -> dict[str, bool]:
-        class _FailingStartChannel:
+        class _FailingStartChannel(BaseChannel):
             async def start(self) -> None:
                 raise RuntimeError("boom")
 
@@ -70,7 +72,7 @@ def test_channel_manager_lifecycle_and_status_snapshot():
 def test_channel_manager_start_failure_marks_degraded():
     from claudebot_gateway.channel_manager import ChannelManager
 
-    class _StartFailChannel:
+    class _StartFailChannel(BaseChannel):
         async def start(self) -> None:
             raise RuntimeError("connect failed")
 

@@ -10,10 +10,17 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-from claudebot_gateway.config import GatewayConfig, load_gateway_config
+from claudebot_gateway.config import CHANNEL_NAMES, GatewayConfig, load_gateway_config
 from claudebot_gateway.runtime import GatewayApp, GatewayRuntime
 
 _LOGGER = logging.getLogger("claudebot_gateway.cli")
+
+
+def _load_config_from_args(args: argparse.Namespace) -> GatewayConfig:
+    return load_gateway_config(
+        workspace_root=Path(args.workspace_root) if args.workspace_root else None,
+        sqlite_path=Path(args.db_path) if args.db_path else None,
+    )
 
 
 def status_text(data: GatewayRuntime | dict[str, object]) -> str:
@@ -144,6 +151,7 @@ def _channels_status_text(config: GatewayConfig, live_channels: dict[str, object
         ("whatsapp", config.channels.whatsapp.enabled, ""),
         ("slack", config.channels.slack.enabled, ""),
     ]
+
     live = live_channels if isinstance(live_channels, dict) else {}
     lines: list[str] = []
     for name, enabled, config_info in channel_configs:
@@ -165,10 +173,7 @@ def _channels_status_text(config: GatewayConfig, live_channels: dict[str, object
 
 
 def _handle_channels_status(args: argparse.Namespace) -> int:
-    config = load_gateway_config(
-        workspace_root=Path(args.workspace_root) if args.workspace_root else None,
-        sqlite_path=Path(args.db_path) if args.db_path else None,
-    )
+    config = _load_config_from_args(args)
     live_snapshot = _fetch_live_status(config.health_http.host, config.health_http.port)
     live_channels = None
     if live_snapshot is not None:
@@ -189,10 +194,7 @@ def _handle_cron_add(args: argparse.Namespace) -> int:
     if schedule_count > 1:
         print("error: only one of --every, --at, or --cron can be specified", file=sys.stderr)
         return 1
-    config = load_gateway_config(
-        workspace_root=Path(args.workspace_root) if args.workspace_root else None,
-        sqlite_path=Path(args.db_path) if args.db_path else None,
-    )
+    config = _load_config_from_args(args)
     job_id = args.job_id or f"cron_{uuid.uuid4().hex[:8]}"
     store = SqliteStore(db_path=config.sqlite_path)
 
@@ -246,10 +248,7 @@ def _handle_cron_add(args: argparse.Namespace) -> int:
 def _handle_cron_list(args: argparse.Namespace) -> int:
     from claudebot_gateway.persistence.sqlite_store import SqliteStore
 
-    config = load_gateway_config(
-        workspace_root=Path(args.workspace_root) if args.workspace_root else None,
-        sqlite_path=Path(args.db_path) if args.db_path else None,
-    )
+    config = _load_config_from_args(args)
     store = SqliteStore(db_path=config.sqlite_path)
     jobs = store.list_all_cron_jobs()
     for job in jobs:
@@ -260,10 +259,7 @@ def _handle_cron_list(args: argparse.Namespace) -> int:
 def _handle_cron_remove(args: argparse.Namespace) -> int:
     from claudebot_gateway.cron_service import CronService
 
-    config = load_gateway_config(
-        workspace_root=Path(args.workspace_root) if args.workspace_root else None,
-        sqlite_path=Path(args.db_path) if args.db_path else None,
-    )
+    config = _load_config_from_args(args)
     service = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
     removed = service.remove_job(job_id=args.job_id)
     if not removed:
@@ -284,10 +280,7 @@ def _handle_validate(args: argparse.Namespace) -> int:
         except (json.JSONDecodeError, OSError) as exc:
             errors.append(f"config file parse error: {exc}")
     try:
-        config = load_gateway_config(
-            workspace_root=Path(args.workspace_root) if args.workspace_root else None,
-            sqlite_path=Path(args.db_path) if args.db_path else None,
-        )
+        config = _load_config_from_args(args)
     except Exception as exc:
         errors.append(f"config load error: {exc}")
         config = None
@@ -323,7 +316,7 @@ def _handle_validate(args: argparse.Namespace) -> int:
         f"ok provider={provider} "
         f"workspace={workspace_root.resolve()} "
         f"sqlite={sqlite_path.resolve()} "
-        f"channels={','.join(k for k in ('cli', 'telegram', 'discord', 'feishu', 'whatsapp', 'slack') if getattr(config.channels, k).enabled)}"
+        f"channels={','.join(k for k in CHANNEL_NAMES if getattr(config.channels, k).enabled)}"
     )
     return 0
 
@@ -388,19 +381,13 @@ def main(argv: list[str] | None = None) -> int:
     _configure_logging(args.verbose, log_format=args.log_format)
     _LOGGER.debug("verbose_mode_enabled=true")
     if args.command == "status":
-        config = load_gateway_config(
-            workspace_root=Path(args.workspace_root) if args.workspace_root else None,
-            sqlite_path=Path(args.db_path) if args.db_path else None,
-        )
+        config = _load_config_from_args(args)
         snapshot = _fetch_status(config)
         print(status_text(snapshot))
         return 0
 
     if args.command == "gateway":
-        config = load_gateway_config(
-            workspace_root=Path(args.workspace_root) if args.workspace_root else None,
-            sqlite_path=Path(args.db_path) if args.db_path else None,
-        )
+        config = _load_config_from_args(args)
         workspace_root = config.workspace_root
         sqlite_path = config.sqlite_path
         app = GatewayApp(
@@ -421,10 +408,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "agent":
-        config = load_gateway_config(
-            workspace_root=Path(args.workspace_root) if args.workspace_root else None,
-            sqlite_path=Path(args.db_path) if args.db_path else None,
-        )
+        config = _load_config_from_args(args)
         workspace_root = config.workspace_root
         sqlite_path = config.sqlite_path
         selected_workspace = (workspace_root / args.workspace).resolve()

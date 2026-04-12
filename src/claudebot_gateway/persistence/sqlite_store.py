@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import Any
 
 
+def coerce_to_str_dict(data: dict[str, Any]) -> dict[str, str]:
+    return {k: "" if v is None else str(v) for k, v in data.items()}
+
+
 class SqliteStore:
     def __init__(self, db_path: Path):
         self._db_path = Path(db_path)
@@ -138,6 +142,12 @@ class SqliteStore:
             """
             CREATE INDEX IF NOT EXISTS idx_agent_turns_session_id
             ON agent_turns(session_id)
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_agent_turns_created_at
+            ON agent_turns(created_at)
             """
         )
         self._conn.commit()
