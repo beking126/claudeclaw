@@ -1,47 +1,64 @@
 # claudebot-gateway
 
-Gateway daemon around a Claude-style agent runtime.  
-This repository is currently in an active implementation phase with a working core runtime and a defined roadmap toward full PRD coverage.
+Gateway daemon around Claude Agent SDK. Provides multi-channel messaging, cron scheduling, heartbeat checks, and session persistence via SQLite.
 
-## Current Implementation
+## Features
 
-### Runtime and lifecycle
-- Long-running gateway runtime with supervised worker tasks and graceful stop/drain behavior.
-- Inbound intake can be closed during shutdown to stop accepting new messages.
-- Message bus provides bounded inbound/outbound queues.
+### Channels
+- **CLI** — enabled by default, prints responses to stdout
+- **Telegram** — full adapter with configurable retry/backoff
+- **Feishu (Lark)** — full adapter with webhook + event handling, configurable retry/backoff
+- **Discord, Slack, WhatsApp** — stub adapters (log warnings, ready for real implementations)
 
-### Messaging flow
-- Channel polling worker, agent worker, and outbound dispatcher worker are wired through a shared async bus.
-- Channel manager isolates individual channel poll failures so one channel does not crash the whole loop.
-- Current channel adapters in tree: CLI and Telegram scaffolds.
+### Messaging pipeline
+- Bounded async message bus (inbound/outbound queues)
+- Agent worker consumes inbound, executes Claude Agent SDK, publishes outbound
+- Outbound dispatcher with per-adapter error isolation
+- Per-sender rate limiting (sliding window, configurable)
 
-### Cron and heartbeat
-- Cron service supports persisted jobs with interval-based due execution.
-- Cron runs and delivery outcomes are recorded in SQLite.
-- Heartbeat service reads `workspaces/heartbeat/HEARTBEAT.md` and only triggers on actionable content.
-- Last heartbeat run metadata is persisted in SQLite.
+### Cron scheduling
+- `cron add --every 3600 --prompt "..." --channel telegram --destination "chat:123"`
+- `cron add --at "2026-04-12T15:30" --prompt "..." ...` (one-shot, accepts ISO datetime or epoch)
+- `cron add --cron "*/5 * * * *" --prompt "..." ...` (supports `*`, `*/N`, ranges `1-5`, lists `1,3,5`)
+- `cron list` / `cron remove --job-id <id>`
+- Delivery retry with exponential backoff
 
-### Health, status, and logging
-- `claudebot-gateway status` returns runtime and operational signals.
-- Status includes worker/error state plus queue depths and due cron count.
-- `--verbose` enables debug logging.
-- Key paths are logged (workspace root, main workspace, sqlite path).
+### Heartbeat
+- Reads `workspaces/heartbeat/HEARTBEAT.md` on a configurable interval
+- Only triggers agent execution when file has actionable content
+- Purges old agent turns based on retention config
 
-### Persistence
-- SQLite-backed persistence currently includes:
-  - channel identity registry,
-  - cron runs,
-  - deliveries,
-  - cron jobs,
-  - heartbeat runs.
+### Session persistence
+- Stores agent turns (prompt/response) in SQLite per session
+- Automatically resumes previous session for same workspace/channel/destination
+- Workspace prompt files: `SOUL.md`, `USER.md`, `TOOLS.md` composed into agent context
 
-### Test coverage snapshot
-- Runtime lifecycle and shutdown semantics.
-- Message bus capacity and intake closure behavior.
-- Cron persistence and due execution behavior.
-- Heartbeat actionable behavior and file-based sourcing.
-- CLI status and verbose logging behavior.
-- End-to-end flow across bus, agent runner, cron, and heartbeat.
+### Security
+- Sender allow-lists per channel
+- Workspace path traversal prevention (`validate_workspace_path`)
+- `restrict_to_workspace` mode: denies filesystem escapes and shell access via SDK `can_use_tool` callback
+- Metadata sanitization strips sensitive keys before runtime execution
+
+### Observability
+- `claudebot-gateway status` — queries live gateway HTTP health endpoint
+- `claudebot-gateway channels status` — per-channel enabled/config/live state
+- `GET /health` / `GET /ready` — HTTP health and readiness endpoints
+- `GET /metrics` — runtime counters (queue depths, errors, due cron jobs)
+- `--log-format json` — structured JSON logging for ELK/Loki
+
+### CLI
+```
+claudebot-gateway gateway [--once] [--demo-text TEXT]
+claudebot-gateway status
+claudebot-gateway channels status
+claudebot-gateway agent --prompt TEXT [--workspace NAME]
+claudebot-gateway cron add --prompt TEXT --channel CH --destination DEST [--every N | --at TIME | --cron EXPR]
+claudebot-gateway cron list
+claudebot-gateway cron remove --job-id ID
+claudebot-gateway validate
+```
+
+Global flags: `--verbose`, `--log-format text|json`
 
 ## Quick Start
 
@@ -49,73 +66,87 @@ This repository is currently in an active implementation phase with a working co
 - Python 3.12+
 - `uv`
 
-### Install dependencies
+### Install and test
 
 ```bash
 uv sync --dev
-```
-
-### Run tests
-
-```bash
 uv run pytest -q
+uv run ruff check .
+uv run mypy src tests
 ```
 
-### Start gateway
+### Run gateway
 
 ```bash
 uv run claudebot-gateway gateway
 ```
 
-### Run one-shot smoke turn
+### One-shot smoke test
 
 ```bash
 uv run claudebot-gateway gateway --once --demo-text "hello"
 ```
 
-### Check status (verbose)
+### Docker
 
 ```bash
-uv run claudebot-gateway --verbose status
+docker build -t claudebot-gateway .
+docker run -p 8787:8787 -v $(pwd)/workspaces:/app/workspaces claudebot-gateway
 ```
 
-## Future Implementation (Roadmap)
+## Configuration
 
-The following items are planned to align fully with `docs/PRD_GATEWAY_DAEMON.md`.
+Place config at `.claudebot/config.json`:
 
-### Channels and connectivity
-- Harden remaining stub adapters (Discord, WhatsApp bridge, Slack bridge) into production-ready integrations.
-- Continue Telegram hardening for deeper reconnect lifecycle/failure-mode coverage.
-- Extend adapter health signals into richer unified channel resilience reporting.
+```json
+{
+  "channels": {
+    "telegram": {"enabled": true, "bot_token": "..."},
+    "feishu": {"enabled": true, "app_id": "...", "app_secret": "...", "verify_token": "...", "encrypt_key": "..."}
+  },
+  "agent_runtime": {
+    "claude": {
+      "restrict_to_workspace": true,
+      "session_persistence_enabled": true
+    }
+  },
+  "rate_limit": {
+    "max_requests_per_sender": 10,
+    "window_seconds": 60
+  },
+  "health_http": {"enabled": true, "host": "127.0.0.1", "port": 8787},
+  "heartbeat_interval_seconds": 300,
+  "agent_turns_retention_days": 90
+}
+```
 
-### Agent integration
-- Claude Agent SDK runtime orchestration is implemented through adapter/factory boundaries.
-- Remaining work focuses on richer provider/tool-loop semantics and stronger delivery guarantees.
-
-### Session management
-- Read-only session persistence and resume-by-scope are implemented.
-- Workspace prompt-file loading/composition for `SOUL.md` / `USER.md` / `TOOLS.md` is implemented.
-- Remaining work is explicit policy controls for channel/session scope behavior.
-
-### Scheduling
-- `at` / `every` / cron-expression scheduling is implemented.
-- Delivery retry handling is implemented.
-- Remaining work is policy refinement for prolonged channel outages.
-
-### Security and safety
-- Sender allow-lists for inbound channels are implemented.
-- Add workspace restriction policy wiring for filesystem/exec surfaces.
-- Expand hardening for untrusted channel metadata and prompt-injection vectors.
-
-### Observability and operations
-- CLI status snapshots and optional HTTP health/readiness serving are implemented.
-- Expand structured logs for reconnect attempts, cron outcomes, heartbeat outcomes, and latency/error signals.
+All fields optional with sensible defaults. Run `claudebot-gateway validate` to check config.
 
 ## Repository Structure
 
-```text
-docs/                 PRD and planning docs
-src/claudebot_gateway core gateway runtime and services
-tests/                unit and integration tests
-state/                local sqlite state (runtime artifact)
 ```
+docs/                          PRD and planning docs
+src/claudebot_gateway/         core gateway runtime and services
+  agent_runtime/               provider-agnostic runtime + Claude SDK adapter
+  channels/                    channel adapters (CLI, Telegram, Feishu, stubs)
+  persistence/                 SQLite-backed store
+  agent_runner.py              inbound processing + rate limiting
+  cli.py                       CLI entry point and subcommands
+  config.py                    configuration dataclasses and loading
+  cron_service.py              cron scheduling with delivery retry
+  health.py                    HTTP health/ready/metrics endpoints
+  heartbeat_service.py         periodic heartbeat execution
+  message_bus.py               bounded async message queues
+  outbound_dispatcher.py       outbound delivery with error isolation
+  rate_limiter.py              per-sender sliding window rate limiter
+  runtime.py                   gateway app, workers, session context
+  workspaces.py                workspace resolution and prompt composition
+tests/                         unit and integration tests
+```
+
+## Remaining Roadmap
+
+- Real Discord adapter (discord.py / nextcord)
+- Real Slack adapter (Slack Bolt)
+- Deeper Telegram reconnect lifecycle coverage
+- Finer-grained tool permission controls
