@@ -2,6 +2,7 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict
 from importlib import import_module
+from pathlib import Path
 from typing import Any
 
 from claudebot_gateway.agent_runtime.types import AgentExecutionRequest, AgentExecutionResult
@@ -11,9 +12,31 @@ _LOGGER = logging.getLogger("claudebot_gateway.agent_runtime.claude")
 
 QueryCallable = Callable[..., AsyncIterator[Any]]
 
+_FS_PATH_KEYS = ("file_path", "path")
+_FS_TOOLS = frozenset({"Read", "Write", "Edit", "Glob", "Grep", "NotebookEdit"})
+_SHELL_TOOLS = frozenset({"Bash"})
+
 
 class AgentRuntimeExecutionError(RuntimeError):
     pass
+
+
+def _make_workspace_guard(workspace: Path) -> Callable[..., Any]:
+    workspace_root = workspace.resolve()
+
+    async def can_use_tool(tool_name: str, input: dict[str, Any], context: Any) -> dict[str, Any]:
+        if tool_name in _SHELL_TOOLS:
+            return {"behavior": "deny", "message": "Shell access denied: restrict_to_workspace is enabled", "interrupt": False}
+        if tool_name in _FS_TOOLS:
+            for key in _FS_PATH_KEYS:
+                raw = input.get(key)
+                if isinstance(raw, str) and raw.strip():
+                    target = (workspace_root / raw).resolve() if not Path(raw).is_absolute() else Path(raw).resolve()
+                    if not target.is_relative_to(workspace_root):
+                        return {"behavior": "deny", "message": "Path denied: escapes workspace root", "interrupt": False}
+        return {"behavior": "allow", "updated_input": None, "updated_permissions": None}
+
+    return can_use_tool
 
 
 class ClaudeSdkAdapter:
@@ -87,6 +110,8 @@ class ClaudeSdkAdapter:
         options_payload.pop("skills", None)
         options_payload.pop("session_persistence_enabled", None)
         options_payload.pop("session_scope", None)
+        if options_payload.pop("restrict_to_workspace", False):
+            options_payload["can_use_tool"] = _make_workspace_guard(workspace)
         try:
             sdk_module = import_module("claude_agent_sdk")
         except ImportError:

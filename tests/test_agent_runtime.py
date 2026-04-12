@@ -140,3 +140,89 @@ def test_claude_adapter_applies_request_resume_override(tmp_path: Path):
     options = asyncio.run(run())
     resume_value = options["resume"] if isinstance(options, dict) else getattr(options, "resume")
     assert resume_value == "persisted-resume"
+
+
+def test_workspace_guard_denies_path_escape(tmp_path: Path):
+    from claudebot_gateway.agent_runtime.claude_adapter import _make_workspace_guard
+
+    workspace = tmp_path / "workspaces" / "main"
+    workspace.mkdir(parents=True, exist_ok=True)
+    guard = _make_workspace_guard(workspace)
+
+    async def _check() -> tuple[dict, dict]:
+        deny = await guard("Read", {"file_path": "../../etc/passwd"}, None)
+        allow = await guard("Read", {"file_path": "subdir/file.txt"}, None)
+        return deny, allow
+
+    deny, allow = asyncio.run(_check())
+    assert deny["behavior"] == "deny"
+    assert "escapes" in deny["message"]
+    assert allow["behavior"] == "allow"
+
+
+def test_workspace_guard_denies_shell_tools(tmp_path: Path):
+    from claudebot_gateway.agent_runtime.claude_adapter import _make_workspace_guard
+
+    workspace = tmp_path / "workspaces" / "main"
+    workspace.mkdir(parents=True, exist_ok=True)
+    guard = _make_workspace_guard(workspace)
+
+    async def _check() -> dict:
+        return await guard("Bash", {"command": "ls /"}, None)
+
+    result = asyncio.run(_check())
+    assert result["behavior"] == "deny"
+    assert "Shell access denied" in result["message"]
+
+
+def test_workspace_guard_allows_workspace_paths(tmp_path: Path):
+    from claudebot_gateway.agent_runtime.claude_adapter import _make_workspace_guard
+
+    workspace = tmp_path / "workspaces" / "main"
+    workspace.mkdir(parents=True, exist_ok=True)
+    guard = _make_workspace_guard(workspace)
+
+    async def _check() -> dict:
+        return await guard("Write", {"file_path": str(workspace / "output.txt"), "content": "ok"}, None)
+
+    result = asyncio.run(_check())
+    assert result["behavior"] == "allow"
+
+
+def test_restrict_to_workspace_wires_guard_to_sdk_options(tmp_path: Path):
+    from claudebot_gateway.agent_runtime import AgentExecutionRequest, ClaudeSdkAdapter
+    from claudebot_gateway.config import ClaudeRuntimeOptions
+
+    captured: dict[str, Any] = {}
+
+    async def fake_query(prompt: str, options: Any):
+        captured["options"] = options
+        yield {"type": "result", "result": "ok"}
+
+    async def run() -> Any:
+        workspace = tmp_path / "ws"
+        workspace.mkdir(parents=True, exist_ok=True)
+        adapter = ClaudeSdkAdapter(
+            options=ClaudeRuntimeOptions(restrict_to_workspace=True),
+            query_callable=fake_query,
+        )
+        await adapter.execute(AgentExecutionRequest(prompt="test", workspace=workspace))
+        return captured["options"]
+
+    options = asyncio.run(run())
+    can_use_tool = options["can_use_tool"] if isinstance(options, dict) else getattr(options, "can_use_tool", None)
+    assert callable(can_use_tool)
+
+
+def test_restrict_to_workspace_config_parsing(tmp_path: Path, monkeypatch):
+    from claudebot_gateway.config import load_gateway_config
+
+    config_dir = tmp_path / ".claudebot"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.json").write_text(
+        '{"agent_runtime":{"claude":{"restrict_to_workspace":true}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    config = load_gateway_config()
+    assert config.agent_runtime.claude.restrict_to_workspace is True

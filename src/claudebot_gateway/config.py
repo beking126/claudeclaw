@@ -23,6 +23,7 @@ class ClaudeRuntimeOptions:
     env: dict[str, str] = field(default_factory=dict)
     extra_args: dict[str, str | None] = field(default_factory=dict)
     permission_mode: str | None = None
+    restrict_to_workspace: bool = False
     session_persistence_enabled: bool = True
     session_scope: str = "workspace_channel_destination"
 
@@ -133,6 +134,9 @@ def load_gateway_config(
             session_scope = claude_raw.get("session_scope")
             if isinstance(session_scope, str) and session_scope:
                 config.agent_runtime.claude.session_scope = session_scope
+            restrict_to_workspace = claude_raw.get("restrict_to_workspace")
+            if isinstance(restrict_to_workspace, bool):
+                config.agent_runtime.claude.restrict_to_workspace = restrict_to_workspace
     return config
 
 
