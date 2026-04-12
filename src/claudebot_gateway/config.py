@@ -92,6 +92,8 @@ class GatewayConfig:
     heartbeat_interval_seconds: int = 300
     sqlite_path: Path = Path("state/gateway.db")
     agent_turns_retention_days: int = 90
+    rate_limit_max_requests_per_sender: int = 0
+    rate_limit_window_seconds: float = 60.0
 
 
 def load_gateway_config(
@@ -137,6 +139,14 @@ def load_gateway_config(
             restrict_to_workspace = claude_raw.get("restrict_to_workspace")
             if isinstance(restrict_to_workspace, bool):
                 config.agent_runtime.claude.restrict_to_workspace = restrict_to_workspace
+    rate_limit_raw = raw.get("rate_limit")
+    if isinstance(rate_limit_raw, dict):
+        max_requests = rate_limit_raw.get("max_requests_per_sender")
+        if isinstance(max_requests, int):
+            config.rate_limit_max_requests_per_sender = max_requests
+        window_seconds = rate_limit_raw.get("window_seconds")
+        if isinstance(window_seconds, (int, float)):
+            config.rate_limit_window_seconds = float(window_seconds)
     return config
 
 

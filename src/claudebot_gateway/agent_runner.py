@@ -1,9 +1,11 @@
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
 from claudebot_gateway.agent_runtime import AgentExecutionRequest, AgentRuntime
 from claudebot_gateway.message_bus import MessageBus
+from claudebot_gateway.rate_limiter import SlidingWindowRateLimiter
 from claudebot_gateway.workspaces import validate_workspace_path
 
 _LOGGER = logging.getLogger("claudebot_gateway.agent_runner")
@@ -19,10 +21,12 @@ class AgentRunner:
         runtime: AgentRuntime,
         default_workspace: Path,
         channel_allowed_senders: dict[str, set[str]] | None = None,
+        rate_limiter: SlidingWindowRateLimiter | None = None,
     ):
         self._runtime = runtime
         self._default_workspace = Path(default_workspace)
         self._channel_allowed_senders = channel_allowed_senders or {}
+        self._rate_limiter = rate_limiter
 
     async def process_once(self, bus: MessageBus) -> dict[str, Any]:
         inbound = await bus.inbound.get()
@@ -59,6 +63,21 @@ class AgentRunner:
                 destination,
             )
             return outbound
+        if self._rate_limiter is not None:
+            sender = self._extract_sender(inbound)
+            if sender and not self._rate_limiter.is_allowed(sender, now=time.monotonic()):
+                outbound = {
+                    "channel": channel,
+                    "destination": destination,
+                    "text": "Rate limit exceeded. Try again later.",
+                }
+                await bus.publish_outbound(outbound)
+                _LOGGER.info(
+                    "agent_runner_rate_limited channel=%s sender=%s",
+                    channel,
+                    sender,
+                )
+                return outbound
         safe_metadata = self._sanitize_metadata(inbound)
         try:
             result = await self._runtime.execute(

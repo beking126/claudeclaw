@@ -268,10 +268,18 @@ class GatewayApp:
         config: GatewayConfig,
         channel_allowed_senders: dict[str, set[str]],
     ) -> tuple[AgentRunner, OutboundDispatcher, CronService, HeartbeatService, GatewayRuntime, HealthService]:
+        rate_limiter = None
+        if config.rate_limit_max_requests_per_sender > 0:
+            from claudebot_gateway.rate_limiter import SlidingWindowRateLimiter
+            rate_limiter = SlidingWindowRateLimiter(
+                max_requests=config.rate_limit_max_requests_per_sender,
+                window_seconds=config.rate_limit_window_seconds,
+            )
         agent_runner = AgentRunner(
             runtime=self._session_runtime,
             default_workspace=self._workspace_resolver.main(),
             channel_allowed_senders=channel_allowed_senders,
+            rate_limiter=rate_limiter,
         )
         dispatcher = OutboundDispatcher(adapters=self._adapters)
         cron = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root, store=self._store)

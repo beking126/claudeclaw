@@ -235,3 +235,31 @@ def test_workspace_path_uses_validate_workspace_path(monkeypatch, tracking_runti
     used_workspace = asyncio.run(_run())
     assert calls["count"] == 1
     assert used_workspace == (default_workspace / "subproject").resolve()
+
+
+def test_rate_limited_sender_gets_rejection_without_runtime_call(tracking_runtime):
+    import asyncio
+
+    from claudebot_gateway.agent_runner import AgentRunner
+    from claudebot_gateway.message_bus import MessageBus
+    from claudebot_gateway.rate_limiter import SlidingWindowRateLimiter
+
+    async def _run() -> tuple[dict[str, str], int]:
+        bus = MessageBus()
+        limiter = SlidingWindowRateLimiter(max_requests=1, window_seconds=60.0)
+        runner = AgentRunner(
+            runtime=tracking_runtime,
+            default_workspace=Path("workspaces/main"),
+            rate_limiter=limiter,
+        )
+        await bus.publish_inbound({"channel": "telegram", "destination": "chat:1", "sender": "chatty", "text": "msg1"})
+        await runner.process_once(bus)
+        await bus.publish_inbound({"channel": "telegram", "destination": "chat:1", "sender": "chatty", "text": "msg2"})
+        outbound = await runner.process_once(bus)
+        return outbound, len(tracking_runtime.requests)
+
+    outbound, request_count = asyncio.run(_run())
+    assert request_count == 1
+    assert outbound["text"] == "Rate limit exceeded. Try again later."
+    assert outbound["channel"] == "telegram"
+    assert outbound["destination"] == "chat:1"
