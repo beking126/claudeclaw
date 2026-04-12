@@ -152,17 +152,14 @@ class CronService:
 
     def due_job_count(self, *, now_epoch_seconds: float | None = None) -> int:
         now = time.time() if now_epoch_seconds is None else now_epoch_seconds
-        return len(self._store.list_due_cron_jobs(now_epoch_seconds=now))
+        return self._store.count_due_cron_jobs(now_epoch_seconds=now)
 
     def list_jobs(self) -> list[dict[str, Any]]:
         return self._store.list_all_cron_jobs()
 
     def remove_job(self, *, job_id: str) -> bool:
-        existing = self._store.list_all_cron_jobs()
-        if not any(job["job_id"] == job_id for job in existing):
-            return False
-        self._store.delete_cron_job(job_id=job_id)
-        return True
+        deleted = self._store.delete_cron_job(job_id=job_id)
+        return deleted > 0
 
     def get_last_delivery(self, job_id: str) -> dict[str, str] | None:
         delivery = self._store.get_last_delivery_by_job(job_id)

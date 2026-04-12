@@ -348,7 +348,7 @@ class GatewayApp:
         while not stop_event.is_set():
             if queue.empty():
                 try:
-                    await asyncio.wait_for(stop_event.wait(), timeout=0.05)
+                    await asyncio.wait_for(stop_event.wait(), timeout=0.5)
                 except TimeoutError:
                     continue
                 continue

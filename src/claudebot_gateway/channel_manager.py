@@ -28,14 +28,7 @@ class ChannelManager:
         return await self._run_all(self._run_poll_once)
 
     def status_snapshot(self) -> dict[str, dict[str, object]]:
-        return {
-            name: {
-                "state": status["state"],
-                "last_error": status["last_error"],
-                "reconnect_attempts": status["reconnect_attempts"],
-            }
-            for name, status in self._status.items()
-        }
+        return {name: dict(status) for name, status in self._status.items()}
 
     def _increment_reconnect_attempts(self, name: str) -> None:
         current = self._status[name].get("reconnect_attempts")

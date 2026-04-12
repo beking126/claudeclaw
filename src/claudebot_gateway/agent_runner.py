@@ -50,7 +50,8 @@ class AgentRunner:
             workspace,
             len(prompt),
         )
-        if not self._is_sender_allowed(channel=channel, inbound=inbound):
+        sender = self._extract_sender(inbound)
+        if not self._is_sender_allowed(channel=channel, sender=sender):
             outbound = {
                 "channel": channel,
                 "destination": destination,
@@ -64,7 +65,6 @@ class AgentRunner:
             )
             return outbound
         if self._rate_limiter is not None:
-            sender = self._extract_sender(inbound)
             if sender and not self._rate_limiter.is_allowed(sender, now=time.monotonic()):
                 outbound = {
                     "channel": channel,
@@ -117,11 +117,10 @@ class AgentRunner:
         )
         return outbound
 
-    def _is_sender_allowed(self, *, channel: str, inbound: dict[str, Any]) -> bool:
+    def _is_sender_allowed(self, *, channel: str, sender: str | None) -> bool:
         allowed_senders = self._channel_allowed_senders.get(channel)
         if not allowed_senders:
             return True
-        sender = self._extract_sender(inbound)
         if sender is None:
             return False
         return sender in allowed_senders

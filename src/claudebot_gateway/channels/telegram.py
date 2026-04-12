@@ -31,9 +31,7 @@ class TelegramChannel(BaseChannel):
         self._bus = bus
         self._token = token or os.getenv("CLAUDEBOT_TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
         self._sdk_loader = sdk_loader or self._load_sdk
-        self._reconnect_attempts = 0
         self._app: Any = None
-        self._chat_ids: dict[str, int] = {}
 
     async def start(self) -> None:
         if self._running:
@@ -100,7 +98,6 @@ class TelegramChannel(BaseChannel):
         return {
             "running": self._running,
             "last_error": self._last_error,
-            "reconnect_attempts": self._reconnect_attempts,
             "connected": self._app is not None,
         }
 
@@ -136,7 +133,6 @@ class TelegramChannel(BaseChannel):
         if isinstance(username, str) and username:
             sender = f"{sender}|{username}"
         chat_id = str(getattr(message, "chat_id", ""))
-        self._chat_ids[sender] = int(chat_id) if chat_id.isdigit() else 0
         text = getattr(message, "text", None) or getattr(message, "caption", None) or "[empty message]"
         metadata = {
             "message_id": getattr(message, "message_id", 0),

@@ -25,12 +25,5 @@ class MessageBus:
     async def publish_outbound(self, item: dict[str, Any]) -> None:
         await self.outbound.put(item)
 
-    def make_busy_rejection(self, channel: str, destination: str) -> dict[str, str]:
-        return {
-            "channel": channel,
-            "destination": destination,
-            "text": "System busy. Try again shortly.",
-        }
-
     def close_inbound_intake(self) -> None:
         self._inbound_intake_open = False

@@ -1,11 +1,6 @@
-from collections.abc import AsyncIterator, Callable
-from typing import Any
-
-from claudebot_gateway.agent_runtime.claude_adapter import ClaudeSdkAdapter
+from claudebot_gateway.agent_runtime.claude_adapter import ClaudeSdkAdapter, QueryCallable
 from claudebot_gateway.agent_runtime.types import AgentRuntime
 from claudebot_gateway.config import GatewayConfig
-
-QueryCallable = Callable[..., AsyncIterator[Any]]
 
 
 class UnsupportedRuntimeProviderError(ValueError):

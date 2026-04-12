@@ -82,9 +82,10 @@ class HealthService:
                 status_code = 200
                 payload = self._metrics_snapshot()
             elif path in ("/ready", "/readyz"):
-                ready = self._is_ready()
+                runtime_snapshot = self._runtime.health_snapshot()
+                ready = self._is_ready(runtime_snapshot)
                 status_code = 200 if ready else 503
-                payload = {"ready": ready, "runtime": self._runtime.health_snapshot()}
+                payload = {"ready": ready, "runtime": runtime_snapshot}
         except Exception:
             status_code = 500
             payload = {"error": "internal_error"}
@@ -103,8 +104,7 @@ class HealthService:
         writer.close()
         await writer.wait_closed()
 
-    def _is_ready(self) -> bool:
-        runtime_snapshot = self._runtime.health_snapshot()
+    def _is_ready(self, runtime_snapshot: dict[str, object]) -> bool:
         running = runtime_snapshot.get("running")
         if not isinstance(running, bool):
             return False

@@ -40,7 +40,6 @@ class FeishuChannel(BaseChannel):
         self._encrypt_key = encrypt_key
         self._sdk_loader = sdk_loader or self._load_sdk
         self._send_sdk: dict[str, Any] | None = None
-        self._reconnect_attempts = 0
         self._seen_event_ids: OrderedDict[str, None] = OrderedDict()
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
         self._client: Any = None
@@ -167,7 +166,6 @@ class FeishuChannel(BaseChannel):
         return {
             "running": self._running,
             "last_error": self._last_error,
-            "reconnect_attempts": self._reconnect_attempts,
             "seen_event_count": len(self._seen_event_ids),
             "connected": self._client is not None and self._ws_client is not None,
         }

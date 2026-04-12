@@ -15,7 +15,11 @@ def test_gateway_e2e_cli_message_cron_heartbeat_flow(tmp_path: Path, collecting_
         dispatcher = OutboundDispatcher(adapters={"telegram": collecting_adapter})
         await bus.publish_inbound({"channel": "telegram", "destination": "chat:1", "text": "hello"})
         accepted = await bus.try_publish_inbound({"channel": "telegram", "destination": "chat:1", "text": "overflow"})
-        rejection = bus.make_busy_rejection("cli", "chat:1")
+        rejection: dict[str, str] = {
+            "channel": "cli",
+            "destination": "chat:1",
+            "text": "System busy. Try again shortly.",
+        }
         await runner.process_once(bus)
         await dispatcher.dispatch_once(bus)
 

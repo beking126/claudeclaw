@@ -10,6 +10,8 @@ def coerce_to_str_dict(data: dict[str, Any]) -> dict[str, str]:
 
 
 class SqliteStore:
+    _CRON_JOB_COLUMNS = "job_id, prompt, channel, destination, interval_seconds, schedule_kind, schedule_value, next_run_epoch_seconds"
+
     def __init__(self, db_path: Path):
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -346,8 +348,8 @@ class SqliteStore:
 
     def list_due_cron_jobs(self, *, now_epoch_seconds: float) -> list[dict[str, Any]]:
         rows = self._conn.execute(
-            """
-            SELECT job_id, prompt, channel, destination, interval_seconds, schedule_kind, schedule_value, next_run_epoch_seconds
+            f"""
+            SELECT {self._CRON_JOB_COLUMNS}
             FROM cron_jobs
             WHERE next_run_epoch_seconds <= ?
             ORDER BY next_run_epoch_seconds ASC
@@ -356,10 +358,17 @@ class SqliteStore:
         ).fetchall()
         return [self._row_to_cron_job(row) for row in rows]
 
+    def count_due_cron_jobs(self, *, now_epoch_seconds: float) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM cron_jobs WHERE next_run_epoch_seconds <= ?",
+            (now_epoch_seconds,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
     def list_all_cron_jobs(self) -> list[dict[str, Any]]:
         rows = self._conn.execute(
-            """
-            SELECT job_id, prompt, channel, destination, interval_seconds, schedule_kind, schedule_value, next_run_epoch_seconds
+            f"""
+            SELECT {self._CRON_JOB_COLUMNS}
             FROM cron_jobs
             ORDER BY next_run_epoch_seconds ASC
             """
@@ -377,9 +386,10 @@ class SqliteStore:
         )
         self._conn.commit()
 
-    def delete_cron_job(self, *, job_id: str) -> None:
-        self._conn.execute("DELETE FROM cron_jobs WHERE job_id = ?", (job_id,))
+    def delete_cron_job(self, *, job_id: str) -> int:
+        cursor = self._conn.execute("DELETE FROM cron_jobs WHERE job_id = ?", (job_id,))
         self._conn.commit()
+        return cursor.rowcount
 
     def record_heartbeat_run(
         self,
