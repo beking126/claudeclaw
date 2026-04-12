@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 def test_status_command_returns_ok_without_running_gateway():
@@ -399,3 +400,28 @@ def test_validate_detects_invalid_config_json(tmp_path: Path, capsys, monkeypatc
     ])
     assert exit_code == 1
     assert "parse error" in capsys.readouterr().err
+
+
+def test_log_format_json_emits_structured_lines(tmp_path: Path, capsys):
+    import logging
+    from claudebot_gateway.cli import _configure_logging
+
+    _configure_logging(False, log_format="json")
+    logger = logging.getLogger("claudebot_gateway.cli")
+    logger.info("structured_check")
+
+    captured = capsys.readouterr()
+    lines = [line for line in captured.err.splitlines() if line.strip()]
+    parsed = [json.loads(line) for line in lines if '"ts"' in line]
+    assert any(p["logger"] == "claudebot_gateway.cli" for p in parsed)
+
+
+def test_log_format_text_is_default(tmp_path: Path, capsys):
+    from claudebot_gateway.cli import main
+
+    exit_code = main([
+        "status",
+        "--workspace-root", str(tmp_path / "workspaces"),
+        "--db-path", str(tmp_path / "state" / "gateway.db"),
+    ])
+    assert exit_code == 0

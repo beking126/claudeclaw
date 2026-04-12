@@ -50,13 +50,21 @@ def status_text(data: GatewayRuntime | dict[str, object]) -> str:
     )
 
 
-def _configure_logging(verbose: bool) -> None:
+def _configure_logging(verbose: bool, *, log_format: str = "text") -> None:
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(levelname)s %(name)s %(message)s",
-        force=True,
-    )
+    if log_format == "json":
+        logging.basicConfig(
+            level=level,
+            format='{"ts":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
+            datefmt="%Y-%m-%dT%H:%M:%S",
+            force=True,
+        )
+    else:
+        logging.basicConfig(
+            level=level,
+            format="%(levelname)s %(name)s %(message)s",
+            force=True,
+        )
 
 
 def _fetch_live_status(host: str, port: int) -> dict[str, object] | None:
@@ -279,6 +287,7 @@ def _handle_validate(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="claudebot-gateway")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--log-format", choices=("text", "json"), default="text")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     gateway = subparsers.add_parser("gateway")
@@ -325,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     validate.add_argument("--db-path", default=None)
 
     args = parser.parse_args(argv)
-    _configure_logging(args.verbose)
+    _configure_logging(args.verbose, log_format=args.log_format)
     _LOGGER.debug("verbose_mode_enabled=true")
     if args.command == "status":
         config = load_gateway_config(
