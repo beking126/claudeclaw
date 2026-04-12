@@ -426,8 +426,7 @@ class GatewayApp:
         destination: str,
         metadata: dict[str, str],
     ) -> str:
-        runtime = self._runtime_with_session_context(self._agent_runtime)
-        result = await runtime.execute(
+        result = await self._session_runtime.execute(
             AgentExecutionRequest(
                 prompt=prompt,
                 workspace=workspace,
@@ -441,8 +440,7 @@ class GatewayApp:
     async def execute_prompt(self, *, prompt: str, workspace: Path | None = None) -> str:
         selected_workspace = workspace or self._workspace_resolver.main()
         selected_workspace.mkdir(parents=True, exist_ok=True)
-        runtime = self._runtime_with_session_context(self._agent_runtime)
-        result = await runtime.execute(
+        result = await self._session_runtime.execute(
             AgentExecutionRequest(
                 prompt=prompt,
                 workspace=selected_workspace,

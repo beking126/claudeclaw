@@ -125,10 +125,10 @@ def test_agent_command_supports_workspace_override(tmp_path: Path, capsys, monke
     assert cli_capture_runtime.workspace == workspace_root / "custom-room"
 
 
-def test_status_command_loads_local_config_json(tmp_path: Path, monkeypatch):
+def test_status_command_exits_cleanly_without_running_gateway(tmp_path: Path, monkeypatch):
     from claudebot_gateway.cli import main
 
-    config_dir = tmp_path / "claudebot"
+    config_dir = tmp_path / ".claudebot"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "config.json").write_text(
         '{"channels":{"telegram":{"enabled":true,"bot_token":"json-token"}}}',

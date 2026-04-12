@@ -137,7 +137,7 @@ def test_gateway_app_heartbeat_agent_uses_runtime_execution(tmp_path: Path):
             )
         )
         fake = _FakeRuntime()
-        app._agent_runtime = fake
+        app._session_runtime = app._runtime_with_session_context(fake)
         response = await app._heartbeat_agent("check", tmp_path / "workspaces" / "heartbeat")
         request = fake.calls[0]
         assert request.channel is not None
@@ -170,7 +170,7 @@ def test_gateway_app_cron_agent_uses_runtime_execution(tmp_path: Path):
             )
         )
         fake = _FakeRuntime()
-        app._agent_runtime = fake
+        app._session_runtime = app._runtime_with_session_context(fake)
         response = await app._cron_agent("daily", tmp_path / "workspaces" / "cron_job_01")
         request = fake.calls[0]
         assert request.channel is not None
