@@ -8,3 +8,5 @@ gateway.db
 *.db
 *.log
 workspaces/.claudebot/config.json
+.claudebot/config.json
+.claudebot/gateway.config.json
