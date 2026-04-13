@@ -12,6 +12,7 @@ _LOGGER = logging.getLogger("claudebot_gateway.agent_runtime.claude")
 
 QueryCallable = Callable[..., AsyncIterator[Any]]
 
+_TEXT_KEYS = ("result", "final_response", "response", "text", "output_text")
 _FS_PATH_KEYS = ("file_path", "path")
 _FS_TOOLS = frozenset({"Read", "Write", "Edit", "Glob", "Grep", "NotebookEdit"})
 _SHELL_TOOLS = frozenset({"Bash"})
@@ -131,7 +132,7 @@ class ClaudeSdkAdapter:
 
     def _extract_text(self, message: Any) -> str:
         if isinstance(message, dict):
-            for key in ("result", "final_response", "response", "text", "output_text"):
+            for key in _TEXT_KEYS:
                 value = message.get(key)
                 if isinstance(value, str):
                     return value
@@ -145,7 +146,7 @@ class ClaudeSdkAdapter:
                             blocks.append(block_text)
                 return "".join(blocks)
             return ""
-        for attr in ("result", "final_response", "response", "text", "output_text"):
+        for attr in _TEXT_KEYS:
             value = getattr(message, attr, None)
             if isinstance(value, str):
                 return value

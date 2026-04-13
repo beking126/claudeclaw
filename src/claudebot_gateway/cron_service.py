@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 import time
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Literal
 from datetime import datetime, timezone
 
 from claudebot_gateway.persistence.sqlite_store import SqliteStore, coerce_to_str_dict
@@ -10,6 +10,10 @@ from claudebot_gateway.workspaces import WorkspaceResolver
 
 SendFunc = Callable[[dict[str, str]], Awaitable[None]]
 AgentFunc = Callable[[str, Path], Awaitable[str]]
+
+ScheduleKind = Literal["every", "at", "cron"]
+RunStatus = Literal["ok", "error"]
+DeliveryStatus = Literal["ok", "dropped"]
 
 
 class CronService:
@@ -53,8 +57,8 @@ class CronService:
         workspace.mkdir(parents=True, exist_ok=True)
         report = await agent_func(prompt, workspace)
         failure_reason: str | None = None
-        delivery_status = "ok"
-        run_status = "ok"
+        delivery_status: DeliveryStatus = "ok"
+        run_status: RunStatus = "ok"
         message = {
             "channel": target["channel"],
             "destination": target["destination"],
@@ -87,7 +91,7 @@ class CronService:
         prompt: str,
         target: dict[str, str],
         interval_seconds: int | None = None,
-        schedule_kind: str = "every",
+        schedule_kind: ScheduleKind = "every",
         schedule_value: str | None = None,
         run_at_epoch_seconds: float | None = None,
     ) -> None:

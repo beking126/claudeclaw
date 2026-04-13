@@ -178,7 +178,7 @@ class FeishuChannel(BaseChannel):
         asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
 
     async def _on_message(self, data: Any) -> None:
-        _LOGGER.info(f"Received msg {data}")
+        _LOGGER.info("feishu_msg_received data=%s", data)
         if not self._running:
             return
         if self._bus is None:

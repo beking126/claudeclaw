@@ -4,7 +4,6 @@ import json
 import logging
 import sys
 import uuid
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import URLError
@@ -184,8 +183,8 @@ def _handle_channels_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def _handle_cron_add(args: argparse.Namespace) -> int:
-    from claudebot_gateway.persistence.sqlite_store import SqliteStore
+async def _handle_cron_add(args: argparse.Namespace) -> int:
+    from claudebot_gateway.cron_service import CronService
 
     schedule_count = sum(1 for flag in (args.every, args.at, args.cron) if flag is not None)
     if schedule_count == 0:
@@ -196,62 +195,55 @@ def _handle_cron_add(args: argparse.Namespace) -> int:
         return 1
     config = _load_config_from_args(args)
     job_id = args.job_id or f"cron_{uuid.uuid4().hex[:8]}"
-    store = SqliteStore(db_path=config.sqlite_path)
-
-    now = time.time()
-    if args.every is not None:
-        interval = int(args.every)
-        if interval < 1:
-            print("error: --every must be at least 1 second", file=sys.stderr)
-            return 1
-        store.upsert_cron_job(
-            job_id=job_id,
-            prompt=args.prompt,
-            channel=args.channel,
-            destination=args.destination,
-            interval_seconds=interval,
-            schedule_kind="every",
-            schedule_value=str(interval),
-            next_run_epoch_seconds=now,
-        )
-    elif args.at is not None:
-        try:
-            run_at = _parse_at_time(args.at)
-        except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
-        store.upsert_cron_job(
-            job_id=job_id,
-            prompt=args.prompt,
-            channel=args.channel,
-            destination=args.destination,
-            interval_seconds=0,
-            schedule_kind="at",
-            schedule_value=str(run_at),
-            next_run_epoch_seconds=run_at,
-        )
-    elif args.cron is not None:
-        store.upsert_cron_job(
-            job_id=job_id,
-            prompt=args.prompt,
-            channel=args.channel,
-            destination=args.destination,
-            interval_seconds=0,
-            schedule_kind="cron",
-            schedule_value=args.cron,
-            next_run_epoch_seconds=now,
-        )
+    service = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
+    target = {"channel": args.channel, "destination": args.destination}
+    try:
+        if args.every is not None:
+            interval = int(args.every)
+            if interval < 1:
+                print("error: --every must be at least 1 second", file=sys.stderr)
+                return 1
+            await service.schedule_job(
+                job_id=job_id,
+                prompt=args.prompt,
+                target=target,
+                interval_seconds=interval,
+                schedule_kind="every",
+            )
+        elif args.at is not None:
+            try:
+                run_at = _parse_at_time(args.at)
+            except ValueError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 1
+            await service.schedule_job(
+                job_id=job_id,
+                prompt=args.prompt,
+                target=target,
+                schedule_kind="at",
+                run_at_epoch_seconds=run_at,
+            )
+        elif args.cron is not None:
+            await service.schedule_job(
+                job_id=job_id,
+                prompt=args.prompt,
+                target=target,
+                schedule_kind="cron",
+                schedule_value=args.cron,
+            )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     print(f"scheduled {job_id}")
     return 0
 
 
 def _handle_cron_list(args: argparse.Namespace) -> int:
-    from claudebot_gateway.persistence.sqlite_store import SqliteStore
+    from claudebot_gateway.cron_service import CronService
 
     config = _load_config_from_args(args)
-    store = SqliteStore(db_path=config.sqlite_path)
-    jobs = store.list_all_cron_jobs()
-    for job in jobs:
+    service = CronService(db_path=config.sqlite_path, workspace_root=config.workspace_root)
+    for job in service.list_jobs():
         print(_cron_job_line(job))
     return 0
 
@@ -437,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "cron":
         if args.cron_action == "add":
-            return _handle_cron_add(args)
+            return asyncio.run(_handle_cron_add(args))
         if args.cron_action == "list":
             return _handle_cron_list(args)
         if args.cron_action == "remove":
