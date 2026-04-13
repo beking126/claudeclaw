@@ -1,6 +1,48 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import sqlite3
+
+from claudebot_gateway.persistence.migrations import ensure_schema
+
+
+def test_migrations_run_idempotently(tmp_path: Path):
+    """Running ensure_schema twice applies each migration only once."""
+    db_path = tmp_path / "state" / "gateway.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    ensure_schema(conn)
+    applied_first = {
+        row[0] for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+    }
+    assert len(applied_first) >= 2  # at least initial + cron columns
+
+    ensure_schema(conn)
+    applied_second = {
+        row[0] for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+    }
+    assert applied_first == applied_second
+
+    conn.close()
+
+
+def test_schema_migrations_table_tracks_descriptions(tmp_path: Path):
+    db_path = tmp_path / "state" / "gateway.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    ensure_schema(conn)
+
+    rows = conn.execute("SELECT version, description FROM schema_migrations ORDER BY version").fetchall()
+    assert len(rows) >= 2
+    descriptions = {row["version"]: row["description"] for row in rows}
+    assert descriptions[1] == "initial schema"
+    assert descriptions[2] == "ensure cron_jobs has schedule columns"
+
+    conn.close()
+
 
 def test_sqlite_store_exposes_row_mapping_helpers(tmp_path: Path):
     from claudebot_gateway.persistence.sqlite_store import SqliteStore

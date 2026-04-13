@@ -13,7 +13,7 @@ from claudebot_gateway.channels.feishu import FeishuChannel
 from claudebot_gateway.channels.slack import SlackBridgeChannel
 from claudebot_gateway.channels.telegram import TelegramChannel
 from claudebot_gateway.channels.whatsapp import WhatsAppBridgeChannel
-from claudebot_gateway.config import CHANNEL_NAMES, GatewayConfig
+from claudebot_gateway.config import CHANNEL_NAMES, GatewayConfig, reload_gateway_config
 from claudebot_gateway.cron_service import CronService
 from claudebot_gateway.health import HealthService
 from claudebot_gateway.heartbeat_service import HeartbeatService
@@ -271,6 +271,7 @@ class GatewayApp:
                 self._dispatch_worker,
                 self._cron_worker,
                 self._heartbeat_worker,
+                self._config_watcher_worker,
             ],
             on_stopping_hooks=[self._bus.close_inbound_intake],
         )
@@ -386,6 +387,38 @@ class GatewayApp:
                 await asyncio.wait_for(stop_event.wait(), timeout=1.0)
             except TimeoutError:
                 continue
+
+    async def _config_watcher_worker(self, stop_event: asyncio.Event) -> None:
+        while not stop_event.is_set():
+            try:
+                if reload_gateway_config(self._config):
+                    _LOGGER.info("config_reloaded applying_hot_updates")
+                    self._apply_config_updates()
+            except Exception:
+                _LOGGER.exception("config_watcher_reload_failed")
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=30.0)
+            except TimeoutError:
+                continue
+
+    def _apply_config_updates(self) -> None:
+        """Apply hot-reloadable config fields without restarting channels."""
+        self._agent_runner.update_allowed_senders(
+            self._build_allowed_senders(self._config)
+        )
+        new_max = self._config.rate_limit_max_requests_per_sender
+        new_window = self._config.rate_limit_window_seconds
+        if new_max > 0 and self._agent_runner._rate_limiter is None:
+            from claudebot_gateway.rate_limiter import SlidingWindowRateLimiter
+            self._agent_runner._rate_limiter = SlidingWindowRateLimiter(
+                max_requests=new_max, window_seconds=new_window,
+            )
+        elif new_max <= 0:
+            self._agent_runner._rate_limiter = None
+        elif self._agent_runner._rate_limiter is not None:
+            self._agent_runner._rate_limiter.update_limits(
+                max_requests=new_max, window_seconds=new_window,
+            )
 
     async def _cron_send(self, message: dict[str, str]) -> None:
         await self._bus.publish_outbound(message)

@@ -28,6 +28,9 @@ class AgentRunner:
         self._channel_allowed_senders = channel_allowed_senders or {}
         self._rate_limiter = rate_limiter
 
+    def update_allowed_senders(self, senders: dict[str, set[str]]) -> None:
+        self._channel_allowed_senders = senders
+
     async def process_once(self, bus: MessageBus) -> dict[str, Any]:
         inbound = await bus.inbound.get()
         channel = str(inbound.get("channel", "cli"))

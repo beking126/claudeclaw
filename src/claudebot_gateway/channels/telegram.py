@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import logging
 import os
@@ -10,6 +11,10 @@ from claudebot_gateway.message_bus import MessageBus
 
 
 _LOGGER = logging.getLogger("claudebot_gateway.channels.telegram")
+
+_MAX_RECONNECT_ATTEMPTS = 10
+_RECONNECT_BASE_BACKOFF = 2.0
+_RECONNECT_MAX_BACKOFF = 120.0
 
 
 def _escape_html(text: str) -> str:
@@ -36,10 +41,69 @@ class TelegramChannel(BaseChannel):
         self._token = token or os.getenv("CLAUDEBOT_TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
         self._sdk_loader = sdk_loader or self._load_sdk
         self._app: Any = None
+        self._reconnect_attempts: int = 0
 
     async def start(self) -> None:
         if self._running:
             return
+        await self._connect()
+        self._running = True
+        self._last_error = None
+
+    async def stop(self) -> None:
+        if not self._running:
+            return
+        self._running = False
+        if self._app is not None:
+            await self._app.updater.stop()
+            await self._app.stop()
+            await self._app.shutdown()
+
+    async def poll_once(self) -> None:
+        """Health check: detect if Telegram polling stopped and attempt reconnect."""
+        if not self._running or self._app is None:
+            return
+        updater_running = getattr(self._app.updater, "running", False)
+        if updater_running:
+            if self._reconnect_attempts > 0:
+                _LOGGER.info("telegram_reconnected after %s attempts", self._reconnect_attempts)
+                self._reconnect_attempts = 0
+                self._last_error = None
+            return
+        _LOGGER.warning("telegram_polling_stopped attempting reconnect attempt=%s", self._reconnect_attempts + 1)
+        await self._reconnect()
+
+    def health(self) -> dict[str, object]:
+        return {
+            "running": self._running,
+            "last_error": self._last_error,
+            "connected": self._app is not None,
+            "polling_active": self._is_polling_active(),
+            "reconnect_attempts": self._reconnect_attempts,
+        }
+
+    async def process_raw_message(self, raw_message: dict[str, Any]) -> None:
+        if not self._running:
+            raise RuntimeError("telegram channel is not running")
+        if self._bus is None:
+            raise RuntimeError("telegram channel has no message bus")
+        inbound: dict[str, Any] = {
+            "channel": "telegram",
+            "destination": str(raw_message.get("destination", "")),
+            "text": str(raw_message.get("text", "")),
+        }
+        sender = raw_message.get("sender")
+        if isinstance(sender, str) and sender:
+            inbound["sender"] = sender
+        metadata = raw_message.get("metadata")
+        if isinstance(metadata, dict):
+            safe_metadata = {k: v for k, v in metadata.items() if isinstance(k, str) and isinstance(v, str | int | float | bool)}
+            if safe_metadata:
+                inbound["metadata"] = safe_metadata
+        await self._bus.publish_inbound(inbound)
+        self._last_error = None
+
+    async def _connect(self) -> None:
         if not self._token:
             raise RuntimeError("telegram bot token is not configured")
         sdk = self._sdk_loader()
@@ -65,45 +129,42 @@ class TelegramChannel(BaseChannel):
             _LOGGER.info("telegram_connected username=%s", username)
         except Exception:
             _LOGGER.info("telegram_connected username=unknown")
-        self._running = True
-        self._last_error = None
 
-    async def stop(self) -> None:
-        if not self._running:
+    async def _reconnect(self) -> None:
+        self._reconnect_attempts += 1
+        if self._reconnect_attempts > _MAX_RECONNECT_ATTEMPTS:
+            self._last_error = f"max reconnect attempts ({_MAX_RECONNECT_ATTEMPTS}) exceeded"
+            _LOGGER.error("telegram_reconnect_failed %s", self._last_error)
             return
-        self._running = False
-        if self._app is not None:
-            await self._app.updater.stop()
-            await self._app.stop()
-            await self._app.shutdown()
+        backoff = min(_RECONNECT_BASE_BACKOFF * (2 ** (self._reconnect_attempts - 1)), _RECONNECT_MAX_BACKOFF)
+        _LOGGER.info("telegram_reconnect_backoff attempt=%s backoff=%.1fs", self._reconnect_attempts, backoff)
+        await asyncio.sleep(backoff)
+        try:
+            if self._app is not None:
+                try:
+                    await self._app.updater.stop()
+                except Exception as exc:
+                    _LOGGER.warning("telegram_reconnect_cleanup updater.stop error=%s", exc)
+                try:
+                    await self._app.stop()
+                except Exception as exc:
+                    _LOGGER.warning("telegram_reconnect_cleanup app.stop error=%s", exc)
+                try:
+                    await self._app.shutdown()
+                except Exception as exc:
+                    _LOGGER.warning("telegram_reconnect_cleanup app.shutdown error=%s", exc)
+            await self._connect()
+            self._last_error = None
+            self._reconnect_attempts = 0
+            _LOGGER.info("telegram_reconnect_succeeded")
+        except Exception as exc:
+            self._last_error = str(exc)
+            _LOGGER.error("telegram_reconnect_failed attempt=%s error=%s", self._reconnect_attempts, exc)
 
-    async def process_raw_message(self, raw_message: dict[str, Any]) -> None:
-        if not self._running:
-            raise RuntimeError("telegram channel is not running")
-        if self._bus is None:
-            raise RuntimeError("telegram channel has no message bus")
-        inbound: dict[str, Any] = {
-            "channel": "telegram",
-            "destination": str(raw_message.get("destination", "")),
-            "text": str(raw_message.get("text", "")),
-        }
-        sender = raw_message.get("sender")
-        if isinstance(sender, str) and sender:
-            inbound["sender"] = sender
-        metadata = raw_message.get("metadata")
-        if isinstance(metadata, dict):
-            safe_metadata = {k: v for k, v in metadata.items() if isinstance(k, str) and isinstance(v, str | int | float | bool)}
-            if safe_metadata:
-                inbound["metadata"] = safe_metadata
-        await self._bus.publish_inbound(inbound)
-        self._last_error = None
-
-    def health(self) -> dict[str, object]:
-        return {
-            "running": self._running,
-            "last_error": self._last_error,
-            "connected": self._app is not None,
-        }
+    def _is_polling_active(self) -> bool:
+        if self._app is None:
+            return False
+        return bool(getattr(self._app.updater, "running", False))
 
     async def _send_message(self, message: dict[str, str]) -> None:
         if self._app is None:
@@ -124,7 +185,7 @@ class TelegramChannel(BaseChannel):
         if message is None or user is None:
             return
         first_name = getattr(user, "first_name", "there")
-        await message.reply_text(f"👋 Hi {first_name}! I'm claudebot gateway.")
+        await message.reply_text(f"Hi {first_name}! I'm claudebot gateway.")
 
     async def _on_message(self, update: Any, context: Any) -> None:
         _ = context

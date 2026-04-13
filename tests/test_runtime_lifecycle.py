@@ -289,7 +289,7 @@ def test_gateway_app_build_services_returns_expected_components(tmp_path: Path):
     assert isinstance(runtime, GatewayRuntime)
     assert isinstance(health, HealthService)
     snapshot = runtime.health_snapshot()
-    assert snapshot["worker_count"] == 4
+    assert snapshot["worker_count"] == 5
 
 
 def test_gateway_app_wires_health_http_host_and_port(tmp_path: Path):

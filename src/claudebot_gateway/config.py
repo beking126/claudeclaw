@@ -7,6 +7,23 @@ CHANNEL_NAMES = ("cli", "telegram", "discord", "feishu", "whatsapp", "slack")
 
 
 @dataclass(slots=True)
+class ToolPermissionConfig:
+    """Fine-grained tool permission controls beyond the binary restrict_to_workspace mode."""
+
+    allowed_shell_patterns: list[str] = field(default_factory=list)
+    """Glob-style patterns for shell commands allowed even under restrict_to_workspace.
+    Example: ["git status", "git log*", "ls*"]"""
+
+    denied_tools: list[str] = field(default_factory=list)
+    """Tool names that are always denied regardless of other settings.
+    Example: ["Bash", "NotebookEdit"]"""
+
+    allowed_tools: list[str] = field(default_factory=list)
+    """If non-empty, only these tool names are permitted. All others are denied.
+    Example: ["Read", "Grep", "Glob"]"""
+
+
+@dataclass(slots=True)
 class ClaudeRuntimeOptions:
     tools: list[str] = field(default_factory=list)
     allowed_tools: list[str] = field(default_factory=list)
@@ -26,6 +43,7 @@ class ClaudeRuntimeOptions:
     extra_args: dict[str, str | None] = field(default_factory=dict)
     permission_mode: str | None = None
     restrict_to_workspace: bool = False
+    tool_permissions: ToolPermissionConfig = field(default_factory=ToolPermissionConfig)
     session_persistence_enabled: bool = True
     session_scope: str = "workspace_channel_destination"
 
@@ -96,6 +114,8 @@ class GatewayConfig:
     agent_turns_retention_days: int = 90
     rate_limit_max_requests_per_sender: int = 0
     rate_limit_window_seconds: float = 60.0
+    _source_path: Path | None = field(default=None, repr=False)
+    _source_mtime: float = field(default=0.0, repr=False)
 
 
 def load_gateway_config(
@@ -106,15 +126,22 @@ def load_gateway_config(
 ) -> GatewayConfig:
     effective_config_path = config_path or Path(".claudebot/config.json")
     raw: dict[str, Any] = {}
+    mtime = 0.0
     try:
+        stat = effective_config_path.stat()
+        mtime = stat.st_mtime
         loaded = json.loads(effective_config_path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             raw = loaded
     except FileNotFoundError:
         pass
+    except OSError:
+        pass
     workspace = workspace_root or Path(str(raw.get("workspace_root", "workspaces")))
     sqlite = sqlite_path or Path(str(raw.get("sqlite_path", "state/gateway.db")))
     config = GatewayConfig(workspace_root=workspace, sqlite_path=sqlite)
+    config._source_path = effective_config_path
+    config._source_mtime = mtime
     channels_raw = raw.get("channels")
     if isinstance(channels_raw, dict):
         _apply_channel_toggle(config.channels.cli, channels_raw.get("cli"))
@@ -143,6 +170,9 @@ def load_gateway_config(
             restrict_to_workspace = claude_raw.get("restrict_to_workspace")
             if isinstance(restrict_to_workspace, bool):
                 config.agent_runtime.claude.restrict_to_workspace = restrict_to_workspace
+            tool_perms_raw = claude_raw.get("tool_permissions")
+            if isinstance(tool_perms_raw, dict):
+                _apply_tool_permissions(config.agent_runtime.claude.tool_permissions, tool_perms_raw)
     rate_limit_raw = raw.get("rate_limit")
     if isinstance(rate_limit_raw, dict):
         max_requests = rate_limit_raw.get("max_requests_per_sender")
@@ -232,3 +262,75 @@ def _apply_feishu_config(channel: FeishuChannelConfig, raw: dict[str, Any]) -> N
     if encrypt_key is not None:
         channel.encrypt_key = encrypt_key
     _apply_retry_backoff_fields(raw, channel)
+
+
+def _apply_tool_permissions(perms: ToolPermissionConfig, raw: dict[str, Any]) -> None:
+    allowed_shell = raw.get("allowed_shell_patterns")
+    if isinstance(allowed_shell, list):
+        perms.allowed_shell_patterns = [p for p in allowed_shell if isinstance(p, str)]
+    denied = raw.get("denied_tools")
+    if isinstance(denied, list):
+        perms.denied_tools = [t for t in denied if isinstance(t, str)]
+    allowed = raw.get("allowed_tools")
+    if isinstance(allowed, list):
+        perms.allowed_tools = [t for t in allowed if isinstance(t, str)]
+
+
+def reload_gateway_config(config: GatewayConfig) -> bool:
+    """Reload config from the source file if it has changed.
+
+    Updates *config* in-place with safe-to-change fields (rate limits,
+    allowed senders, tool permissions). Returns True if a reload occurred.
+
+    Does NOT restart channels or the runtime — only updates values that
+    take effect on the next request.
+    """
+    source_path = config._source_path
+    if source_path is None:
+        return False
+    try:
+        current_mtime = source_path.stat().st_mtime
+    except OSError:
+        return False
+    if current_mtime == config._source_mtime:
+        return False
+    try:
+        raw = json.loads(source_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(raw, dict):
+        return False
+    config._source_mtime = current_mtime
+    _apply_raw_to_existing(config, raw)
+    return True
+
+
+def _apply_raw_to_existing(config: GatewayConfig, raw: dict[str, Any]) -> None:
+    """Apply hot-reloadable fields from *raw* into an existing config."""
+    channels_raw = raw.get("channels")
+    if isinstance(channels_raw, dict):
+        _apply_channel_toggle(config.channels.cli, channels_raw.get("cli"))
+        _apply_channel_toggle(config.channels.discord, channels_raw.get("discord"))
+        _apply_channel_toggle(config.channels.whatsapp, channels_raw.get("whatsapp"))
+        _apply_channel_toggle(config.channels.slack, channels_raw.get("slack"))
+        feishu_raw = channels_raw.get("feishu")
+        if isinstance(feishu_raw, dict):
+            _apply_feishu_config(config.channels.feishu, feishu_raw)
+        telegram_raw = channels_raw.get("telegram")
+        if isinstance(telegram_raw, dict):
+            _apply_telegram_config(config.channels.telegram, telegram_raw)
+    rate_limit_raw = raw.get("rate_limit")
+    if isinstance(rate_limit_raw, dict):
+        max_requests = rate_limit_raw.get("max_requests_per_sender")
+        if isinstance(max_requests, int):
+            config.rate_limit_max_requests_per_sender = max_requests
+        window_seconds = rate_limit_raw.get("window_seconds")
+        if isinstance(window_seconds, (int, float)):
+            config.rate_limit_window_seconds = float(window_seconds)
+    agent_runtime_raw = raw.get("agent_runtime")
+    if isinstance(agent_runtime_raw, dict):
+        claude_raw = agent_runtime_raw.get("claude")
+        if isinstance(claude_raw, dict):
+            tool_perms_raw = claude_raw.get("tool_permissions")
+            if isinstance(tool_perms_raw, dict):
+                _apply_tool_permissions(config.agent_runtime.claude.tool_permissions, tool_perms_raw)

@@ -63,11 +63,15 @@ class _FakeBot:
 
 
 class _FakeUpdater:
+    def __init__(self):
+        self.running = False
+
     async def start_polling(self, **kwargs) -> None:
         _ = kwargs
+        self.running = True
 
     async def stop(self) -> None:
-        return None
+        self.running = False
 
 
 class _FakeApplication:
@@ -231,3 +235,50 @@ def test_telegram_channel_on_message_normalizes_into_bus():
     assert inbound["destination"] == "99"
     assert inbound["text"] == "hello inbound"
     assert inbound["sender"] == "42|alice"
+
+
+def test_telegram_health_exposes_polling_state():
+    from claudebot_gateway.channels.telegram import TelegramChannel
+
+    async def _run() -> dict[str, object]:
+        channel = TelegramChannel(token="token-1", sdk_loader=_fake_telegram_sdk)
+        await channel.start()
+        health = channel.health()
+        await channel.stop()
+        return health
+
+    health = asyncio.run(_run())
+    assert health["polling_active"] is True
+    assert health["reconnect_attempts"] == 0
+
+
+def test_telegram_poll_once_detects_stopped_polling_and_reconnects():
+    from claudebot_gateway.channels.telegram import TelegramChannel
+
+    async def _run() -> dict[str, object]:
+        channel = TelegramChannel(token="token-1", sdk_loader=_fake_telegram_sdk)
+        await channel.start()
+        # Simulate polling stopped by setting running = False on updater
+        channel._app.updater.running = False
+        await channel.poll_once()
+        # After reconnect, the fake updater sets running = True via start_polling
+        return channel.health()
+
+    health = asyncio.run(_run())
+    assert health["polling_active"] is True
+    assert health["reconnect_attempts"] == 0
+
+
+def test_telegram_poll_once_noop_when_polling_active():
+    from claudebot_gateway.channels.telegram import TelegramChannel
+
+    async def _run() -> int:
+        channel = TelegramChannel(token="token-1", sdk_loader=_fake_telegram_sdk)
+        await channel.start()
+        assert channel._app.updater.running is True
+        await channel.poll_once()
+        await channel.stop()
+        return channel._reconnect_attempts
+
+    attempts = asyncio.run(_run())
+    assert attempts == 0

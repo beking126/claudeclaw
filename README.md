@@ -1,5 +1,7 @@
 # claudebot-gateway
 
+[![CI](https://github.com/beking126/claudeclaw/actions/workflows/ci.yml/badge.svg)](https://github.com/beking126/claudeclaw/actions/workflows/ci.yml)
+
 Gateway daemon around Claude Agent SDK. Provides multi-channel messaging, cron scheduling, heartbeat checks, and session persistence via SQLite.
 
 ## Features

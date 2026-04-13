@@ -1,3 +1,4 @@
+import fnmatch
 import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict
@@ -6,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from claudebot_gateway.agent_runtime.types import AgentExecutionRequest, AgentExecutionResult
-from claudebot_gateway.config import ClaudeRuntimeOptions
+from claudebot_gateway.config import ClaudeRuntimeOptions, ToolPermissionConfig
 
 _LOGGER = logging.getLogger("claudebot_gateway.agent_runtime.claude")
 
@@ -28,12 +29,32 @@ class AgentRuntimeExecutionError(RuntimeError):
     pass
 
 
-def _make_workspace_guard(workspace: Path) -> Callable[..., Any]:
+def _make_workspace_guard(
+    workspace: Path,
+    tool_permissions: ToolPermissionConfig | None = None,
+) -> Callable[..., Any]:
     workspace_root = workspace.resolve()
+    perms = tool_permissions or ToolPermissionConfig()
 
     async def can_use_tool(tool_name: str, input: dict[str, Any], context: Any) -> dict[str, Any]:
+        # 1. Explicit deny list takes highest priority
+        if tool_name in perms.denied_tools:
+            return {"behavior": "deny", "message": f"Tool '{tool_name}' is denied by configuration", "interrupt": False}
+
+        # 2. Explicit allow list (if non-empty, only listed tools pass)
+        if perms.allowed_tools and tool_name not in perms.allowed_tools:
+            return {"behavior": "deny", "message": f"Tool '{tool_name}' is not in the allowed list", "interrupt": False}
+
+        # 3. Shell tool handling
         if tool_name in _SHELL_TOOLS:
+            command = str(input.get("command", "")).strip()
+            if perms.allowed_shell_patterns and command:
+                for pattern in perms.allowed_shell_patterns:
+                    if fnmatch.fnmatch(command, pattern):
+                        return {"behavior": "allow", "updated_input": None, "updated_permissions": None}
             return {"behavior": "deny", "message": "Shell access denied: restrict_to_workspace is enabled", "interrupt": False}
+
+        # 4. Filesystem tool path restriction
         if tool_name in _FS_TOOLS:
             for key in _FS_PATH_KEYS:
                 raw = input.get(key)
@@ -124,8 +145,12 @@ class ClaudeSdkAdapter:
         options_payload.pop("skills", None)
         options_payload.pop("session_persistence_enabled", None)
         options_payload.pop("session_scope", None)
+        tool_perms = options_payload.pop("tool_permissions", None)
         if options_payload.pop("restrict_to_workspace", False):
-            options_payload["can_use_tool"] = _make_workspace_guard(workspace)
+            options_payload["can_use_tool"] = _make_workspace_guard(
+                workspace,
+                tool_permissions=tool_perms if isinstance(tool_perms, ToolPermissionConfig) else None,
+            )
         if not self._sdk_resolved:
             try:
                 sdk_module = import_module("claude_agent_sdk")

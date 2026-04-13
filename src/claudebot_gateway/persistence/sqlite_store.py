@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from claudebot_gateway.persistence.migrations import ensure_schema
+
 
 class SqliteStore:
     _CRON_JOB_COLUMNS = "job_id, prompt, channel, destination, interval_seconds, schedule_kind, schedule_value, next_run_epoch_seconds"
@@ -13,150 +15,7 @@ class SqliteStore:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self._db_path)
         self._conn.row_factory = sqlite3.Row
-        self._ensure_schema()
-
-    def _ensure_schema(self) -> None:
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS channel_identity (
-                source_key TEXT PRIMARY KEY,
-                channel_type TEXT NOT NULL,
-                raw_ids_json TEXT NOT NULL,
-                sanitized_ids_json TEXT NOT NULL,
-                workspace_key TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        self._conn.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS channel_identity_updated_at
-            AFTER UPDATE ON channel_identity
-            BEGIN
-                UPDATE channel_identity
-                SET updated_at = CURRENT_TIMESTAMP
-                WHERE source_key = NEW.source_key;
-            END
-            """
-        )
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cron_runs (
-                run_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_id TEXT NOT NULL,
-                prompt TEXT NOT NULL,
-                workspace_key TEXT NOT NULL,
-                status TEXT NOT NULL,
-                error TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS deliveries (
-                delivery_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_id TEXT NOT NULL,
-                channel TEXT NOT NULL,
-                destination TEXT NOT NULL,
-                status TEXT NOT NULL,
-                failure_reason TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cron_jobs (
-                job_id TEXT PRIMARY KEY,
-                prompt TEXT NOT NULL,
-                channel TEXT NOT NULL,
-                destination TEXT NOT NULL,
-                interval_seconds INTEGER NOT NULL,
-                schedule_kind TEXT NOT NULL DEFAULT 'every',
-                schedule_value TEXT NOT NULL DEFAULT '',
-                next_run_epoch_seconds REAL NOT NULL,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        self._ensure_cron_jobs_columns()
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS heartbeat_runs (
-                run_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                actionable INTEGER NOT NULL,
-                status TEXT NOT NULL,
-                error TEXT,
-                workspace_key TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_sessions (
-                session_row_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider TEXT NOT NULL,
-                workspace_path TEXT NOT NULL,
-                channel TEXT,
-                destination TEXT,
-                session_id TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(provider, workspace_path, channel, destination)
-            )
-            """
-        )
-        self._conn.execute(
-            """
-            CREATE TRIGGER IF NOT EXISTS agent_sessions_updated_at
-            AFTER UPDATE ON agent_sessions
-            BEGIN
-                UPDATE agent_sessions
-                SET updated_at = CURRENT_TIMESTAMP
-                WHERE session_row_id = NEW.session_row_id;
-            END
-            """
-        )
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS agent_turns (
-                turn_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider TEXT NOT NULL,
-                session_id TEXT,
-                workspace_path TEXT NOT NULL,
-                channel TEXT,
-                destination TEXT,
-                prompt_text TEXT NOT NULL,
-                response_text TEXT NOT NULL,
-                metadata_json TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        self._conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_agent_turns_session_id
-            ON agent_turns(session_id)
-            """
-        )
-        self._conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_agent_turns_created_at
-            ON agent_turns(created_at)
-            """
-        )
-        self._conn.commit()
-
-    def _ensure_cron_jobs_columns(self) -> None:
-        rows = self._conn.execute("PRAGMA table_info(cron_jobs)").fetchall()
-        existing = {str(row["name"]) for row in rows}
-        if "schedule_kind" not in existing:
-            self._conn.execute("ALTER TABLE cron_jobs ADD COLUMN schedule_kind TEXT NOT NULL DEFAULT 'every'")
-        if "schedule_value" not in existing:
-            self._conn.execute("ALTER TABLE cron_jobs ADD COLUMN schedule_value TEXT NOT NULL DEFAULT ''")
+        ensure_schema(self._conn)
 
     def _row_to_delivery(self, row: sqlite3.Row) -> dict[str, Any]:
         return {

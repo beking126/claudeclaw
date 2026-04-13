@@ -22,3 +22,8 @@ class SlidingWindowRateLimiter:
         count += 1
         self._buckets[key] = (window_start, count)
         return count <= self._max_requests
+
+    def update_limits(self, *, max_requests: int, window_seconds: float) -> None:
+        self._max_requests = max_requests
+        self._window_seconds = window_seconds
+        self._buckets.clear()

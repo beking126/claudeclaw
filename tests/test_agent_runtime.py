@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -226,3 +227,115 @@ def test_restrict_to_workspace_config_parsing(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     config = load_gateway_config()
     assert config.agent_runtime.claude.restrict_to_workspace is True
+
+
+def test_tool_permissions_denied_tools(tmp_path: Path):
+    from claudebot_gateway.agent_runtime.claude_adapter import _make_workspace_guard
+    from claudebot_gateway.config import ToolPermissionConfig
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir(parents=True, exist_ok=True)
+    perms = ToolPermissionConfig(denied_tools=["NotebookEdit", "Write"])
+    guard = _make_workspace_guard(workspace, tool_permissions=perms)
+
+    async def _check() -> tuple[dict, dict, dict]:
+        deny_write = await guard("Write", {"file_path": "ok.txt"}, None)
+        deny_nb = await guard("NotebookEdit", {"notebook_path": "a.ipynb"}, None)
+        allow_read = await guard("Read", {"file_path": "ok.txt"}, None)
+        return deny_write, deny_nb, allow_read
+
+    deny_write, deny_nb, allow_read = asyncio.run(_check())
+    assert deny_write["behavior"] == "deny"
+    assert "denied by configuration" in deny_write["message"]
+    assert deny_nb["behavior"] == "deny"
+    assert allow_read["behavior"] == "allow"
+
+
+def test_tool_permissions_allowed_tools_whitelist(tmp_path: Path):
+    from claudebot_gateway.agent_runtime.claude_adapter import _make_workspace_guard
+    from claudebot_gateway.config import ToolPermissionConfig
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir(parents=True, exist_ok=True)
+    perms = ToolPermissionConfig(allowed_tools=["Read", "Grep", "Glob"])
+    guard = _make_workspace_guard(workspace, tool_permissions=perms)
+
+    async def _check() -> tuple[dict, dict]:
+        allow_grep = await guard("Grep", {"pattern": "foo"}, None)
+        deny_write = await guard("Write", {"file_path": "out.txt"}, None)
+        return allow_grep, deny_write
+
+    allow_grep, deny_write = asyncio.run(_check())
+    assert allow_grep["behavior"] == "allow"
+    assert deny_write["behavior"] == "deny"
+    assert "not in the allowed list" in deny_write["message"]
+
+
+def test_tool_permissions_shell_allowed_patterns(tmp_path: Path):
+    from claudebot_gateway.agent_runtime.claude_adapter import _make_workspace_guard
+    from claudebot_gateway.config import ToolPermissionConfig
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir(parents=True, exist_ok=True)
+    perms = ToolPermissionConfig(allowed_shell_patterns=["git status", "git log*", "ls *"])
+    guard = _make_workspace_guard(workspace, tool_permissions=perms)
+
+    async def _check() -> tuple[dict, dict, dict]:
+        allow_git_status = await guard("Bash", {"command": "git status"}, None)
+        allow_git_log = await guard("Bash", {"command": "git log --oneline -5"}, None)
+        deny_rm = await guard("Bash", {"command": "rm -rf /"}, None)
+        return allow_git_status, allow_git_log, deny_rm
+
+    allow_git_status, allow_git_log, deny_rm = asyncio.run(_check())
+    assert allow_git_status["behavior"] == "allow"
+    assert allow_git_log["behavior"] == "allow"
+    assert deny_rm["behavior"] == "deny"
+    assert "Shell access denied" in deny_rm["message"]
+
+
+def test_tool_permissions_config_parsing(tmp_path: Path, monkeypatch):
+    from claudebot_gateway.config import load_gateway_config
+
+    config_dir = tmp_path / ".claudebot"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.json").write_text(
+        json.dumps({
+            "agent_runtime": {
+                "claude": {
+                    "restrict_to_workspace": True,
+                    "tool_permissions": {
+                        "allowed_shell_patterns": ["git status", "ls *"],
+                        "denied_tools": ["NotebookEdit"],
+                        "allowed_tools": [],
+                    },
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    config = load_gateway_config()
+    perms = config.agent_runtime.claude.tool_permissions
+    assert perms.allowed_shell_patterns == ["git status", "ls *"]
+    assert perms.denied_tools == ["NotebookEdit"]
+    assert perms.allowed_tools == []
+
+
+def test_denied_tools_takes_priority_over_shell_patterns(tmp_path: Path):
+    from claudebot_gateway.agent_runtime.claude_adapter import _make_workspace_guard
+    from claudebot_gateway.config import ToolPermissionConfig
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir(parents=True, exist_ok=True)
+    perms = ToolPermissionConfig(
+        denied_tools=["Bash"],
+        allowed_shell_patterns=["git status"],
+    )
+    guard = _make_workspace_guard(workspace, tool_permissions=perms)
+
+    async def _check() -> dict:
+        return await guard("Bash", {"command": "git status"}, None)
+
+    result = asyncio.run(_check())
+    assert result["behavior"] == "deny"
+    assert "denied by configuration" in result["message"]
