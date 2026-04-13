@@ -4,7 +4,8 @@ import time
 from typing import Any, Awaitable, Callable, Literal
 from datetime import datetime, timezone
 
-from claudebot_gateway.persistence.sqlite_store import SqliteStore, coerce_to_str_dict
+from claudebot_gateway.persistence import coerce_to_str_dict
+from claudebot_gateway.persistence.sqlite_store import SqliteStore
 from claudebot_gateway.workspaces import WorkspaceResolver
 
 
@@ -56,7 +57,6 @@ class CronService:
         workspace = self._resolver.cron(job_id)
         workspace.mkdir(parents=True, exist_ok=True)
         report = await agent_func(prompt, workspace)
-        failure_reason: str | None = None
         delivery_status: DeliveryStatus = "ok"
         run_status: RunStatus = "ok"
         message = {

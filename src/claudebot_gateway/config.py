@@ -106,10 +106,12 @@ def load_gateway_config(
 ) -> GatewayConfig:
     effective_config_path = config_path or Path(".claudebot/config.json")
     raw: dict[str, Any] = {}
-    if effective_config_path.exists():
+    try:
         loaded = json.loads(effective_config_path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             raw = loaded
+    except FileNotFoundError:
+        pass
     workspace = workspace_root or Path(str(raw.get("workspace_root", "workspaces")))
     sqlite = sqlite_path or Path(str(raw.get("sqlite_path", "state/gateway.db")))
     config = GatewayConfig(workspace_root=workspace, sqlite_path=sqlite)

@@ -1,7 +1,8 @@
 from pathlib import Path
 from typing import Awaitable, Callable
 
-from claudebot_gateway.persistence.sqlite_store import SqliteStore, coerce_to_str_dict
+from claudebot_gateway.persistence import coerce_to_str_dict
+from claudebot_gateway.persistence.sqlite_store import SqliteStore
 from claudebot_gateway.workspaces import WorkspaceResolver
 
 
@@ -25,29 +26,29 @@ class HeartbeatService:
         actionable = bool(source_text.strip())
         workspace = self._resolver.heartbeat()
         workspace.mkdir(parents=True, exist_ok=True)
-        status = "skipped"
-        error: str | None = None
         if actionable:
+            status = "ok"
+            error: str | None = None
             try:
                 await agent_func(source_text, workspace)
-                status = "ok"
             except Exception as exc:
                 status = "error"
                 error = str(exc)
-        self._store.record_heartbeat_run(
-            actionable=actionable,
-            status=status,
-            error=error,
-            workspace_key=workspace.name,
-        )
+            self._store.record_heartbeat_run(
+                actionable=True,
+                status=status,
+                error=error,
+                workspace_key=workspace.name,
+            )
         return actionable
 
     def load_source_text(self) -> str:
         workspace = self._resolver.heartbeat()
         file_path = workspace / "HEARTBEAT.md"
-        if not file_path.exists():
+        try:
+            return file_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
             return ""
-        return file_path.read_text(encoding="utf-8")
 
     def get_last_run(self) -> dict[str, str] | None:
         run = self._store.get_last_heartbeat_run()

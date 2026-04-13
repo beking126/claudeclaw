@@ -18,6 +18,12 @@ _FS_TOOLS = frozenset({"Read", "Write", "Edit", "Glob", "Grep", "NotebookEdit"})
 _SHELL_TOOLS = frozenset({"Bash"})
 
 
+def _get(message: Any, key: str, default: Any = None) -> Any:
+    if isinstance(message, dict):
+        return message.get(key, default)
+    return getattr(message, key, default)
+
+
 class AgentRuntimeExecutionError(RuntimeError):
     pass
 
@@ -43,6 +49,7 @@ def _make_workspace_guard(workspace: Path) -> Callable[..., Any]:
 class ClaudeSdkAdapter:
     def __init__(self, options: ClaudeRuntimeOptions, query_callable: QueryCallable | None = None):
         self._options = options
+        self._base_options_dict = asdict(options)
         self._query_callable = query_callable
         self._cached_query_callable: QueryCallable | None = None
         self._cached_claude_options_cls: Any = None
@@ -102,7 +109,7 @@ class ClaudeSdkAdapter:
         return query_callable
 
     def _build_sdk_options(self, workspace: Any, *, resume_override: str | None = None) -> Any:
-        options_payload = asdict(self._options)
+        options_payload = dict(self._base_options_dict)
         options_payload["cwd"] = workspace
         options_payload["agents"] = options_payload.pop("sub_agents")
         if resume_override:
@@ -131,45 +138,24 @@ class ClaudeSdkAdapter:
         return self._cached_claude_options_cls(**options_payload)
 
     def _extract_text(self, message: Any) -> str:
-        if isinstance(message, dict):
-            for key in _TEXT_KEYS:
-                value = message.get(key)
-                if isinstance(value, str):
-                    return value
-            content = message.get("content")
-            if isinstance(content, list):
-                blocks: list[str] = []
-                for block in content:
-                    if isinstance(block, dict):
-                        block_text = block.get("text")
-                        if isinstance(block_text, str):
-                            blocks.append(block_text)
-                return "".join(blocks)
-            return ""
-        for attr in _TEXT_KEYS:
-            value = getattr(message, attr, None)
+        for key in _TEXT_KEYS:
+            value = _get(message, key)
             if isinstance(value, str):
                 return value
-        content = getattr(message, "content", None)
+        content = _get(message, "content")
         if isinstance(content, list):
-            content_blocks: list[str] = []
+            blocks: list[str] = []
             for block in content:
-                block_text = getattr(block, "text", None)
+                block_text = _get(block, "text")
                 if isinstance(block_text, str):
-                    content_blocks.append(block_text)
-            return "".join(content_blocks)
+                    blocks.append(block_text)
+            return "".join(blocks)
         return ""
 
     def _extract_result_metadata(self, message: Any) -> dict[str, Any]:
-        if isinstance(message, dict):
-            metadata: dict[str, Any] = {}
-            for key in ("usage", "session_id", "stop_reason", "duration_ms", "cost_usd"):
-                if key in message:
-                    metadata[key] = message[key]
-            return metadata
-        metadata = {}
+        metadata: dict[str, Any] = {}
         for key in ("usage", "session_id", "stop_reason", "duration_ms", "cost_usd"):
-            value = getattr(message, key, None)
+            value = _get(message, key)
             if value is not None:
                 metadata[key] = value
         return metadata

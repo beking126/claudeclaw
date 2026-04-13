@@ -48,6 +48,12 @@ class FeishuChannel(BaseChannel):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ws_loop: asyncio.AbstractEventLoop | None = None
 
+    @staticmethod
+    def _track_seen(key: str, store: OrderedDict[str, None], max_size: int = 1000) -> None:
+        store[key] = None
+        while len(store) > max_size:
+            store.popitem(last=False)
+
     async def start(self) -> None:
         if self._running:
             return
@@ -127,9 +133,7 @@ class FeishuChannel(BaseChannel):
         if event_id and event_id in self._seen_event_ids:
             return False
         if event_id:
-            self._seen_event_ids[event_id] = None
-            while len(self._seen_event_ids) > 1000:
-                self._seen_event_ids.popitem(last=False)
+            self._track_seen(event_id, self._seen_event_ids)
         await self.process_raw_message(payload)
         return True
 
@@ -192,12 +196,8 @@ class FeishuChannel(BaseChannel):
         if isinstance(message_id, str) and message_id:
             if message_id in self._processed_message_ids:
                 return
-            self._processed_message_ids[message_id] = None
-            while len(self._processed_message_ids) > 1000:
-                self._processed_message_ids.popitem(last=False)
-            self._seen_event_ids[message_id] = None
-            while len(self._seen_event_ids) > 1000:
-                self._seen_event_ids.popitem(last=False)
+            self._track_seen(message_id, self._processed_message_ids)
+            self._track_seen(message_id, self._seen_event_ids)
         sender_type = getattr(sender, "sender_type", "")
         if sender_type == "bot":
             return

@@ -101,6 +101,11 @@ def _fetch_status(config: GatewayConfig) -> dict[str, object]:
     }
 
 
+def _format_epoch_utc(epoch: float) -> str:
+    dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+    return dt.strftime('%Y-%m-%d %H:%M UTC')
+
+
 def _cron_schedule_label(job: dict[str, object]) -> str:
     kind = str(job.get("schedule_kind", ""))
     value = str(job.get("schedule_value", ""))
@@ -108,8 +113,7 @@ def _cron_schedule_label(job: dict[str, object]) -> str:
         return f"every {value}s"
     if kind == "at":
         ts = float(value) if value else 0.0
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-        return f"at {dt.strftime('%Y-%m-%d %H:%M UTC')}"
+        return f"at {_format_epoch_utc(ts)}"
     if kind == "cron":
         return f"cron {value}"
     return kind
@@ -137,8 +141,7 @@ def _cron_job_line(job: dict[str, object]) -> str:
     schedule = _cron_schedule_label(job)
     next_run_raw = job.get("next_run_epoch_seconds", 0)
     next_ts = float(next_run_raw) if isinstance(next_run_raw, (int, float)) else 0.0
-    dt = datetime.fromtimestamp(next_ts, tz=timezone.utc)
-    return f"{job_id}  {schedule}  {channel}/{destination}  next={dt.strftime('%Y-%m-%d %H:%M UTC')}"
+    return f"{job_id}  {schedule}  {channel}/{destination}  next={_format_epoch_utc(next_ts)}"
 
 
 def _channels_status_text(config: GatewayConfig, live_channels: dict[str, object] | None = None) -> str:
@@ -264,13 +267,14 @@ def _handle_cron_remove(args: argparse.Namespace) -> int:
 def _handle_validate(args: argparse.Namespace) -> int:
     errors: list[str] = []
     config_path = Path(".claudebot/config.json")
-    if config_path.exists():
-        try:
-            raw = json.loads(config_path.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                errors.append(f"config file is not a JSON object: {config_path}")
-        except (json.JSONDecodeError, OSError) as exc:
-            errors.append(f"config file parse error: {exc}")
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            errors.append(f"config file is not a JSON object: {config_path}")
+    except FileNotFoundError:
+        pass
+    except (json.JSONDecodeError, OSError) as exc:
+        errors.append(f"config file parse error: {exc}")
     try:
         config = _load_config_from_args(args)
     except Exception as exc:

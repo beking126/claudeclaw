@@ -5,10 +5,6 @@ from pathlib import Path
 from typing import Any
 
 
-def coerce_to_str_dict(data: dict[str, Any]) -> dict[str, str]:
-    return {k: "" if v is None else str(v) for k, v in data.items()}
-
-
 class SqliteStore:
     _CRON_JOB_COLUMNS = "job_id, prompt, channel, destination, interval_seconds, schedule_kind, schedule_value, next_run_epoch_seconds"
 

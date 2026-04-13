@@ -12,6 +12,10 @@ from claudebot_gateway.message_bus import MessageBus
 _LOGGER = logging.getLogger("claudebot_gateway.channels.telegram")
 
 
+def _escape_html(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 class TelegramChannel(BaseChannel):
     def __init__(
         self,
@@ -183,7 +187,7 @@ class TelegramChannel(BaseChannel):
         text = re.sub(r"`([^`]+)`", _save_inline_code, text)
         text = re.sub(r"^#{1,6}\s+(.+)$", r"\1", text, flags=re.MULTILINE)
         text = re.sub(r"^>\s*(.*)$", r"\1", text, flags=re.MULTILINE)
-        text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        text = _escape_html(text)
         text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
         text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
         text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
@@ -191,9 +195,7 @@ class TelegramChannel(BaseChannel):
         text = re.sub(r"~~(.+?)~~", r"<s>\1</s>", text)
         text = re.sub(r"^[-*]\s+", "• ", text, flags=re.MULTILINE)
         for index, code in enumerate(inline_codes):
-            escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            text = text.replace(f"\x00IC{index}\x00", f"<code>{escaped}</code>")
+            text = text.replace(f"\x00IC{index}\x00", f"<code>{_escape_html(code)}</code>")
         for index, code in enumerate(code_blocks):
-            escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            text = text.replace(f"\x00CB{index}\x00", f"<pre><code>{escaped}</code></pre>")
+            text = text.replace(f"\x00CB{index}\x00", f"<pre><code>{_escape_html(code)}</code></pre>")
         return text
